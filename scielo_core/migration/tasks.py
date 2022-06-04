@@ -18,8 +18,9 @@ from scielo_core.config import (
     CREATE_XML_ZIP_FILE_QUEUE,
 )
 from scielo_core.basic import xml_sps_zip_file
+from scielo_core.id_provider import xml_sps
 from scielo_core.migration import controller
-from scielo_core import id_provider
+from scielo_core.id_provider.view import request_document_id
 
 
 app = Celery('tasks', backend=CELERY_RESULT_BACKEND_URL, broker=CELERY_BROKER_URL)
@@ -32,7 +33,6 @@ DEFAULT_QUEUE = 'high_priority'
 def _handle_result(task_name, result, get_result):
     if get_result:
         return result.get()
-    return result
 
 
 ###########################################
@@ -52,16 +52,16 @@ def task_example(data):
 
 ###########################################
 
-def register_migration(data, get_result=None):
+def register_migration(data, skip_update, get_result=None):
     res = task_register_migration.apply_async(
         queue=REGISTER_MIGRATION_QUEUE,
-        args=(data, ),
+        args=(data, skip_update, ),
     )
     return _handle_result("task register_migration", res, get_result)
 
 
 @app.task(name='task_register_migration')
-def task_register_migration(data):
+def task_register_migration(data, skip_update):
     try:
         controller.save_migration(
             data["v2"], data["aop_pid"], data["file_path"],
@@ -70,12 +70,16 @@ def task_register_migration(data):
             data["order"],
             data["v91"],
             data["v93"],
+            skip_update=skip_update,
         )
+        return True
     except Exception as e:
+        raise
         LOGGER.exception(
             "Unable to save migration %s: %s %s" %
             (data, type(e), e)
         )
+        return False
 
 
 ###########################################
@@ -89,6 +93,10 @@ def update_migration(v2, pid_v3, xml_zip_file_path, get_result=None):
 
 @app.task(name='task_update_migration')
 def task_update_migration(v2, pid_v3, xml_zip_file_path):
+    return _update_migration(v2, pid_v3, xml_zip_file_path)
+
+
+def _update_migration(v2, pid_v3, xml_zip_file_path):
     try:
         controller.update_migration(v2, pid_v3, xml_zip_file_path)
     except Exception as e:
@@ -105,7 +113,7 @@ def harvest_journal_xmls(issn):
         queue=GET_JOURNAL_SORTED_PIDS_QUEUE,
         args=(issn, ),
     )
-    return _handle_result("task harvest_journal_xmls", res)
+    return _handle_result("task harvest_journal_xmls", res, get_result=False)
 
 
 @app.task(name='task_harvest_journal_xmls')
@@ -119,7 +127,7 @@ def task_harvest_journal_xmls(issn):
 ###########################################
 
 def harvest_xml_and_update_migration(pid, get_result=None):
-    res = harvest_xml_and_update_migration.apply_async(
+    res = task_harvest_xml_and_update_migration.apply_async(
         queue=SAVE_XML_ZIP_FILE_QUEUE,
         args=(pid, ),
     )
@@ -128,7 +136,11 @@ def harvest_xml_and_update_migration(pid, get_result=None):
 
 @app.task(name='task_harvest_xml_and_update_migration')
 def task_harvest_xml_and_update_migration(pid):
-    data = get_xml_file_uri_and_pid_v3(pid)
+    return _harvest_xml_and_update_migration(pid)
+
+
+def _harvest_xml_and_update_migration(pid):
+    data = _get_xml_file_uri_and_pid_v3(pid)
     try:
         uri = data["xml"]
         pid_v3 = data["v3"]
@@ -136,40 +148,26 @@ def task_harvest_xml_and_update_migration(pid):
         LOGGER.error("Unable to get xml uri for %s" % pid)
         return None
 
-    content = get_xml_file_content(uri)
+    content = _get_xml_file_content(uri)
     if not content:
         LOGGER.error("Unable to get xml content for %s" % pid)
         return None
 
-    # cria um diretorio temporario
-    tempdir = mkdtemp()
-    xml_zip_file_path = os.path.join(tempdir, pid + ".zip")
-
-    if create_xml_zip_file(xml_zip_file_path, content):
-        try:
-            update_migration(pid, pid_v3, xml_zip_file_path)
-        except Exception as e:
-            LOGGER.exception(
-                "Unable to update_migration: %s %s %s" %
-                (pid, type(e), e)
-            )
-        finally:
-            try:
-                os.unlink(xml_zip_file_path)
-            except IOError:
-                LOGGER.exception("Unable to delete %s" % xml_zip_file_path)
-    else:
-        LOGGER.error(
-            "Unable to create %s %s" % (xml_zip_file_path, pid))
     try:
-        os.rmdir(tempdir)
-    except IOError:
-        LOGGER.exception("Unable to delete %s" % tempdir)
+        xml_zip_file_path = _create_tmp_xml_zip_file(pid + ".zip", content)
+        _update_migration(pid, pid_v3, xml_zip_file_path)
+    except Exception as e:
+        LOGGER.exception(
+            "Unable to update_migration: %s %s %s" %
+            (pid, type(e), e)
+        )
+    finally:
+        _delete_temp_xml_zip_file_path(xml_zip_file_path)
 
 
 # --------------------------------------
 def get_xml_file_uri_and_pid_v3(pid):
-    res = get_xml_file_uri_and_pid_v3.apply_async(
+    res = task_get_xml_file_uri_and_pid_v3.apply_async(
         queue=GET_XML_FILE_URI_AND_PID_V3_QUEUE,
         args=(pid, ),
     )
@@ -178,6 +176,10 @@ def get_xml_file_uri_and_pid_v3(pid):
 
 @app.task(name='task_get_xml_file_uri_and_pid_v3')
 def task_get_xml_file_uri_and_pid_v3(pid):
+    return _get_xml_file_uri_and_pid_v3(pid)
+
+
+def _get_xml_file_uri_and_pid_v3(pid):
     try:
         article = controller.get_article(pid)
         return {"xml": article.xml, "v3": article._id}
@@ -189,7 +191,7 @@ def task_get_xml_file_uri_and_pid_v3(pid):
 
 # --------------------------------------
 def get_xml_file_content(uri):
-    res = get_xml_file_content.apply_async(
+    res = task_get_xml_file_content.apply_async(
         queue=GET_XML_FILE_CONTENT_QUEUE,
         args=(uri, ),
     )
@@ -218,38 +220,30 @@ def _get_xml_file_content(uri, timeout=None):
 
 
 # --------------------------------------
-def create_xml_zip_file(file_path, xml_content):
-    res = create_xml_zip_file.apply_async(
-        queue=CREATE_XML_ZIP_FILE_QUEUE,
-        args=(file_path, xml_content, ),
-    )
-    return _handle_result("task create_xml_zip_file", res, get_result=True)
 
-
-@app.task(name='task_create_xml_zip_file')
-def task_create_xml_zip_file(file_path, xml_content):
+def _create_tmp_xml_zip_file(filename, xml_content):
     try:
-        return xml_sps_zip_file.create_xml_zip_file(file_path, xml_content)
+        LOGGER.info("Creating tmp xml zip file: %s" % xml_content[:100])
+        xml_sps.is_well_formed(xml_content)
+        tempdir = mkdtemp()
+        xml_zip_file_path = os.path.join(tempdir, filename)
+        LOGGER.info("Creating tmp xml zip file: %s" % xml_zip_file_path)
+        xml_sps_zip_file.create_xml_zip_file(xml_zip_file_path, xml_content)
+        LOGGER.info("Creating tmp xml zip file: %s" % xml_zip_file_path)
+        return xml_zip_file_path
     except IOError as e:
+        if os.path.isdir(tempdir):
+            _delete_temp_dir(tempdir)
         LOGGER.exception(
             "Unable to create XML ZIP file %s: %s %s" %
-            (file_path, type(e), e))
-        return False
+            (filename, type(e), e))
+        return None
 
 
 #############################################################
 
 def migrate_journal_xmls(issn):
-    res = task_migrate_journal_xmls.apply_async(
-        queue=GET_JOURNAL_SORTED_PIDS_QUEUE,
-        args=(issn, ),
-    )
-    return _handle_result("task migrate_journal_xmls", res)
-
-
-@app.task(name='task_migrate_journal_xmls')
-def task_migrate_journal_xmls(issn):
-    for pid in controller.get_pids(issn, "TO_MIGRATE"):
+    for pid in controller.get_pids(issn, order_by="v2", status="TO_MIGRATE"):
         LOGGER.debug("Migrate %s" % pid)
         # gera o zip do xml obtido do website
         migrate_xml(pid)
@@ -257,7 +251,7 @@ def task_migrate_journal_xmls(issn):
 
 # --------------------------------------
 def migrate_xml(pid):
-    res = migrate_xml.apply_async(
+    res = task_migrate_xml.apply_async(
         queue=GET_XML_FILE_URI_AND_PID_V3_QUEUE,
         args=(pid, ),
     )
@@ -266,26 +260,46 @@ def migrate_xml(pid):
 
 @app.task(name='task_migrate_xml')
 def task_migrate_xml(pid):
-    try:
-        migration = controller.get_migration(pid)
-    except controller.FetchArticleError as e:
+    migration = controller.get_migration(pid)
+    if not migration:
         LOGGER.exception(
-            "Unable to get article data %s: %s %s" % (pid, type(e), e))
+            "Unable to get article data %s" % (pid, ))
         return None
 
     try:
-        resp = id_provider.view.request_document_id(migration.zip_file)
+        xml_zip_file_path = _create_tmp_xml_zip_file(
+            pid + ".zip", migration.zip_file)
+        
+        resp = request_document_id(xml_zip_file_path)
     except Exception as e:
         LOGGER.exception(
-            "Unable to request_document_id at migration %s: %s %s" %
-            (pid, type(e), e))
-        return None
+            "Unable to request_document_id: %s %s %s" %
+            (pid, type(e), e)
+        )
+    else:
+        try:
+            migration.status = "MIGRATED"
+            migration.save()
+        except Exception as e:
+            LOGGER.exception(
+                "Unable to migrate %s: %s %s" % (pid, type(e), e))
+    finally:
+        _delete_temp_xml_zip_file_path(xml_zip_file_path)
+
+
+def _delete_temp_xml_zip_file_path(xml_zip_file_path):
+    return
     try:
-        migration.status = "MIGRATED"
-        migration.save()
-    except Exception as e:
-        LOGGER.exception(
-            "Unable to migrate %s: %s %s" % (pid, type(e), e))
-        return None
+        os.unlink(xml_zip_file_path)
+    except IOError:
+        LOGGER.exception("Unable to delete %s" % xml_zip_file_path)
+
+    tempdir = os.path.dirname(xml_zip_file_path)
+    _delete_temp_dir(tempdir)
 
 
+def _delete_temp_dir(tempdir):
+    try:
+        os.rmdir(tempdir)
+    except IOError:
+        LOGGER.exception("Unable to delete %s" % tempdir)

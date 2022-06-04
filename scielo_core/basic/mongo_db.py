@@ -17,9 +17,9 @@ from mongoengine import (
 from scielo_core.basic import exceptions
 
 
-def mk_connection(host):
+def mk_connection(host, alias=None):
     try:
-        _db_connect_by_uri(host)
+        _db_connect_by_uri(host, alias)
     except Exception as e:
         raise exceptions.DBConnectError(
             {"exception": type(e), "msg": str(e)}
@@ -27,12 +27,15 @@ def mk_connection(host):
 
 
 @retry(wait=wait_exponential(), stop=stop_after_attempt(10))
-def _db_connect_by_uri(uri):
+def _db_connect_by_uri(uri, alias=None):
     """
     mongodb://{login}:{password}@{host}:{port}/{database}
     """
-    conn = connect(host=uri, maxPoolSize=None)
-    print("%s connected" % uri)
+    params = {"host": uri, "maxPoolSize": None}
+    if alias:
+        params['alias'] = alias
+    conn = connect(**params)
+    print("%s connected" % params)
     return conn
 
 

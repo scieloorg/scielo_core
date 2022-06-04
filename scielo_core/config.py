@@ -19,21 +19,21 @@ CELERY_RESULT_BACKEND_URL = os.environ.get(
 CONCURRENT_PROCESSING = os.environ.get('CONCURRENT_PROCESSING') or True
 
 
-EXAMPLE_QUEUE = os.environ.get("EXAMPLE_QUEUE") or 'low_priority'
-SAVE_PID_IN_JOURNAL_FILE_QUEUE = (
-    os.environ.get("SAVE_PID_IN_JOURNAL_FILE_QUEUE") or 'default')
+EXAMPLE_QUEUE = os.environ.get("EXAMPLE_QUEUE") or 'migr_low_priority'
+REGISTER_MIGRATION_QUEUE = (
+    os.environ.get("REGISTER_MIGRATION_QUEUE") or 'migr_default')
 GET_XML_FILE_URI_AND_PID_V3_QUEUE = (
-    os.environ.get("GET_XML_FILE_URI_AND_PID_V3_QUEUE") or 'high_priority')
+    os.environ.get("GET_XML_FILE_URI_AND_PID_V3_QUEUE") or 'migr_high_priority')
 GET_JOURNAL_SORTED_PIDS_QUEUE = (
-    os.environ.get("GET_JOURNAL_SORTED_PIDS_QUEUE") or 'high_priority')
+    os.environ.get("GET_JOURNAL_SORTED_PIDS_QUEUE") or 'migr_high_priority')
 CREATE_JOURNAL_XML_ZIPS_QUEUE = (
-    os.environ.get("CREATE_JOURNAL_XML_ZIPS_QUEUE") or 'default')
+    os.environ.get("CREATE_JOURNAL_XML_ZIPS_QUEUE") or 'migr_default')
 SAVE_XML_ZIP_FILE_QUEUE = (
-    os.environ.get("SAVE_XML_ZIP_FILE_QUEUE") or 'default')
+    os.environ.get("SAVE_XML_ZIP_FILE_QUEUE") or 'migr_default')
 GET_XML_FILE_CONTENT_QUEUE = (
-    os.environ.get("GET_XML_FILE_CONTENT_QUEUE") or 'low_priority')
+    os.environ.get("GET_XML_FILE_CONTENT_QUEUE") or 'migr_low_priority')
 CREATE_XML_ZIP_FILE_QUEUE = (
-    os.environ.get("CREATE_XML_ZIP_FILE_QUEUE") or 'default')
+    os.environ.get("CREATE_XML_ZIP_FILE_QUEUE") or 'migr_default')
 
 
 def run_concurrently():

@@ -1,5 +1,10 @@
+import logging
 import os
 from zipfile import ZipFile, BadZipFile
+
+
+LOGGER = logging.getLogger(__name__)
+LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
 def get_xml_content(xml_sps_file_path):
@@ -15,22 +20,20 @@ def get_xml_content(xml_sps_file_path):
     bytes
     """
     try:
-        # xml_sps_file_path is a zipfile
-        zf = xml_sps_file_path
-        namelist = zf.namelist()
-    except AttributeError:
-        try:
-            with ZipFile(xml_sps_file_path) as zf:
-                for item in zf.namelist():
-                    if item.endswith(".xml"):
-                        return zf.read(item)
-        except BadZipFile:
-            with open(xml_sps_file_path, "rb") as fp:
-                return fp.read()
-    else:
-        for item in namelist:
-            if item.endswith(".xml"):
-                return zf.read(item)
+        LOGGER.info(
+            "Try to get xml content from zipfile %s" % xml_sps_file_path
+        )
+        with ZipFile(xml_sps_file_path) as zf:
+            for item in zf.namelist():
+                if item.endswith(".xml"):
+                    return zf.read(item)
+    except BadZipFile:
+        LOGGER.info(
+            "Try to get xml content from xml file %s" % xml_sps_file_path
+        )
+        with open(xml_sps_file_path, "rb") as fp:
+            return fp.read()
+    LOGGER.info("...Get xml content from %s" % xml_sps_file_path)
 
 
 def update_zip_file_xml(xml_sps_file_path, content):
@@ -48,17 +51,22 @@ def update_zip_file_xml(xml_sps_file_path, content):
     str
     """
     try:
+        LOGGER.info("Try to read zip %s" % xml_sps_file_path)
         with ZipFile(xml_sps_file_path) as zf:
             for item in zf.namelist():
                 if item.endswith(".xml"):
                     xml_file_path = item
                     break
     except BadZipFile:
+        LOGGER.info("Try to read xml %s" % xml_sps_file_path)
         xml_file_path = os.path.basename(xml_sps_file_path)
         xml_sps_file_path = xml_sps_file_path + ".zip"
 
-    with ZipFile(xml_sps_file_path, "wb") as zf:
+    with ZipFile(xml_sps_file_path, "w") as zf:
         zf.writestr(xml_file_path, content)
+        LOGGER.info("Try to write xml %s %s %s" %
+                     (xml_sps_file_path, xml_file_path, content[:100]))
+
     return xml_sps_file_path
 
 
@@ -83,6 +91,6 @@ def create_xml_zip_file(xml_sps_file_path, content):
     basename = os.path.basename(xml_sps_file_path)
     name, ext = os.path.splitext(basename)
 
-    with ZipFile(xml_sps_file_path, "wb") as zf:
+    with ZipFile(xml_sps_file_path, "w") as zf:
         zf.writestr(name + ".xml", content)
     return os.path.isfile(xml_sps_file_path)

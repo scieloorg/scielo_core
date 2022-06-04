@@ -10,7 +10,7 @@ from scielo_core.id_provider import (
 from scielo_core.config import DATABASE_CONNECT_URL
 
 
-conn = mongo_db.mk_connection(DATABASE_CONNECT_URL)
+conn = mongo_db.mk_connection(DATABASE_CONNECT_URL, 'scielo_core')
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

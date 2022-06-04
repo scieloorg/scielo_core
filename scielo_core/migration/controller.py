@@ -3,10 +3,14 @@ import logging
 from opac_schema.v1.models import Article
 
 from scielo_core.basic import mongo_db
-from scielo_core.config import WEBSITE_DB_URI
 from scielo_core.migration import models
 
-conn = mongo_db.mk_connection(WEBSITE_DB_URI)
+from scielo_core.config import DATABASE_CONNECT_URL
+from scielo_core.config import WEBSITE_DB_URI
+
+mongo_db.mk_connection(WEBSITE_DB_URI)
+mongo_db.mk_connection(DATABASE_CONNECT_URL, 'scielo_core')
+
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -48,18 +52,22 @@ def _fetch_migration_records(**kwargs):
 
 def get_migration(v2):
     try:
-        migration = _fetch_migration_records(**{"v2": v2})[0]
+        return _fetch_migration_records(**{"v2": v2})[0]
     except IndexError:
+        LOGGER.debug("Not found %s" % v2)
         return None
 
 
-def save_migration(v2, aop_pid, file_path, issn, year, order, v91, v93):
+def save_migration(v2, aop_pid, file_path, issn, year, order, v91, v93, skip_update=False):
     try:
         migration = _fetch_migration_records(**{"v2": v2})[0]
+        if skip_update:
+            LOGGER.debug("Skip update %s" % v2)
+            return migration
     except IndexError:
         migration = models.Migration()
         migration.v2 = v2
-        migration.status = 'GETXML'
+    migration.status = 'GET_XML'
 
     # outros tipos de ID
     migration.aop_pid = aop_pid

@@ -1,14 +1,18 @@
+import logging
 from datetime import datetime
 
 from mongoengine import (
-    EmbeddedDocument,
-    EmbeddedDocumentListField,
     Document,
     StringField,
     DateTimeField,
-    DictField,
     FileField,
 )
+from mongoengine.fields import GridFSError
+
+
+LOGGER = logging.getLogger(__name__)
+LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
 
 MIGRATION_STATUS = ('GET_XML', 'TO_MIGRATE', 'MIGRATED')
 
@@ -44,6 +48,7 @@ class Migration(Document):
     updated = DateTimeField()
 
     meta = {
+        'db_alias': 'scielo_core',
         'collection': 'migration',
         'indexes': [
             'v3',
@@ -53,7 +58,7 @@ class Migration(Document):
             'year',
             'order',
             'v91',
-            'v92',
+            'v93',
         ]
     }
 
@@ -63,8 +68,18 @@ class Migration(Document):
 
     @zip_file.setter
     def zip_file(self, file_path):
+        try:
+            self.xml_file_path.delete()
+        except GridFSError as e:
+            LOGGER.debug("Unable to delete %s %s" % (self.xml_file_path, e))
+
         with open(file_path, 'rb') as fd:
-            self.xml_file_path.put(fd, content_type='application/zip')
+            try:
+                LOGGER.debug("Try to put %s %s" % (self.xml_file_path, e))
+                self.xml_file_path.put(fd, content_type='application/zip')
+            except GridFSError:
+                LOGGER.debug("Try to replace %s %s" % (self.xml_file_path, e))
+                self.xml_file_path.replace(fd, content_type='application/zip')
 
     def save(self, *args, **kwargs):
         if not self.created:

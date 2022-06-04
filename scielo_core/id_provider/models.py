@@ -9,6 +9,8 @@ from mongoengine import (
     DictField,
     FileField,
 )
+from mongoengine.fields import GridFSError
+
 
 DOI_CREATION_STATUS = ('auto_assigned', 'assigned_by_editor', 'UNK')
 DOI_REGISTRATION_STATUS = ('registered', 'not_registered', 'UNK')
@@ -135,6 +137,7 @@ class Package(Document):
     updated = DateTimeField()
 
     meta = {
+        'db_alias': 'scielo_core',
         'collection': 'id_provider',
         'indexes': [
             'v3',
@@ -163,8 +166,16 @@ class Package(Document):
 
     @zip_file.setter
     def zip_file(self, file_path):
+        try:
+            self.zip_file_path.delete()
+        except GridFSError:
+            pass
+
         with open(file_path, 'rb') as fd:
-            self.zip_file_path.put(fd, content_type='application/zip')
+            try:
+                self.zip_file_path.put(fd, content_type='application/zip')
+            except GridFSError:
+                self.zip_file_path.replace(fd, content_type='application/zip')
 
     def as_dict(self, to_compare=False):
         """

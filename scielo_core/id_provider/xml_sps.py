@@ -1,7 +1,6 @@
 from scielo_core.basic import xml_sps_zip_file
 
 from lxml import etree
-
 from packtools.sps.models.article_ids import ArticleIds
 from packtools.sps.models.article_doi_with_lang import DoiWithLang
 from packtools.sps.models.front_journal_meta import ISSN
@@ -9,6 +8,10 @@ from packtools.sps.models.front_articlemeta_issue import ArticleMetaIssue
 from packtools.sps.models.article_authors import Authors
 from packtools.sps.models.article_titles import ArticleTitles
 from packtools.sps.models.body import Body
+
+
+def is_well_formed(xml_content):
+    return etree.fromstring(xml_content)
 
 
 def update_ids(zip_file_path, v3, v2, aop_pid):
