@@ -34,3 +34,7 @@ def run_concurrently():
         CELERY_RESULT_BACKEND_URL and
         CELERY_BROKER_URL
     )
+
+
+def get_article_meta_uri(pid, col):
+	return f'https://articlemeta.scielo.org/api/v1/article/?collection={col}&code={pid}&format=xmlrsps'

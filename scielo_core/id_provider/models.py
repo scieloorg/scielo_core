@@ -324,8 +324,8 @@ class Requests(Document):
     }
 
     def update_diffs(self):
-        inputs = (self.in_v2, self.in_v3, self.in_aop_pid)
-        outputs = (self.out_v2, self.out_v3, self.out_aop_pid)
+        inputs = (self.in_v2 or '', self.in_v3 or '', self.in_aop_pid or '')
+        outputs = (self.out_v2 or '', self.out_v3 or '', self.out_aop_pid or '')
         d = 0
         for i, o in zip(inputs, outputs):
             LOGGER.debug(f"i: [{i}], o: [{o}]")

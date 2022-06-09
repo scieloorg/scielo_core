@@ -12,6 +12,7 @@ from scielo_core.config import (
     REGISTER_MIGRATION_QUEUE,
     HARVEST_XMLS_QUEUE,
     MIGRATE_XMLS_QUEUE,
+    get_article_meta_uri,
 )
 from scielo_core.basic import xml_sps_zip_file
 from scielo_core.id_provider import xml_sps, exceptions
@@ -30,10 +31,10 @@ class UnableToCreateXMLZipFileError(Exception):
     ...
 
 
-class HarvestingArticleDataError(Exception):
+class PullDataFromNewWebsiteError(Exception):
     ...
 
-class HarvestingArticlXMLError(Exception):
+class PullXMLError(Exception):
     ...
 
 
@@ -91,32 +92,32 @@ def task_register_migration(data, skip_update):
 
 ###########################################
 
-def harvest_journal_xmls(issn):
-    res = task_harvest_journal_xmls.apply_async(
+def pull_data_from_new_website(issn):
+    res = task_pull_data_from_new_website.apply_async(
         queue=HARVEST_XMLS_QUEUE,
         args=(issn, ),
     )
-    return _handle_result("task harvest_journal_xmls", res, get_result=False)
+    return _handle_result("task pull_data_from_new_website", res, get_result=False)
 
 
-@app.task(name='task_harvest_journal_xmls')
-def task_harvest_journal_xmls(issn):
+@app.task(name='task_pull_data_from_new_website')
+def task_pull_data_from_new_website(issn):
     for pid in controller.get_pids(issn, "GET_XML"):
         LOGGER.debug("Creating xml zip for %s" % pid)
         # gera o zip do xml obtido do website
-        _harvest_xml_and_update_migration(pid)
+        _pull_data_from_new_website(pid)
 
 
-def _harvest_xml_and_update_migration(pid):
+def _pull_data_from_new_website(pid):
     try:
         data = _get_xml_file_uri_and_pid_v3(pid)
         uri = data["xml"]
         pid_v3 = data["v3"]
-        content = _get_xml_file_content(uri)
-        controller.add_xml_and_v3(pid, pid_v3, content)
+        content = _request_xml_content(uri)
+        controller.add_xml_and_v3(pid, pid_v3, content, uri)
     except (
-            HarvestingArticleDataError,
-            HarvestingArticlXMLError,
+            PullDataFromNewWebsiteError,
+            PullXMLError,
             ) as e:
         LOGGER.error("Unable to harvest data %s %s" % (pid, e))
         return None
@@ -132,23 +133,68 @@ def _get_xml_file_uri_and_pid_v3(pid):
         article = controller.get_article(pid)
         return {"xml": article.xml, "v3": article._id}
     except controller.FetchArticleError as e:
-        raise HarvestingArticleDataError(
+        raise PullDataFromNewWebsiteError(
             "Unable to get article data %s: %s %s" % (pid, type(e), e))
 
 
-def _get_xml_file_content(uri, timeout=None):
+def _request_xml_content(uri, timeout=None):
     timeout = timeout or 10
     try:
         r = requests.get(uri, timeout=timeout)
     except requests.Timeout as e:
         LOGGER.debug(
             "Try to request %s again: %s" % (uri, timeout))
-        return _get_xml_file_content(uri, timeout=timeout*2)
+        return _request_xml_content(uri, timeout=timeout*2)
     except requests.HTTPError as e:
-        raise HarvestingArticlXMLError(
+        raise PullXMLError(
             "Unable to get XML content %s: %s %s" % (uri, type(e), e))
     else:
         return r.text
+
+
+###########################################
+
+def pull_data_from_old_website(issn, xml_folder_path, collection):
+    res = task_pull_data_from_old_website.apply_async(
+        queue=HARVEST_XMLS_QUEUE,
+        args=(issn, xml_folder_path, collection),
+    )
+    return _handle_result("task pull_data_from_old_website", res, get_result=False)
+
+
+@app.task(name='task_pull_data_from_old_website')
+def task_pull_data_from_old_website(issn, xml_folder_path, collection):
+    for pid in controller.get_pids(issn, "GET_XML"):
+        LOGGER.debug("Creating xml zip for %s" % pid)
+        # gera o zip do xml obtido do website
+        _pull_data_from_old_website(pid, xml_folder_path, collection)
+
+
+def _pull_data_from_old_website(pid, xml_folder_path, collection):
+    try:
+        migration = controller.get_migration(pid)
+        file_path = os.path.join(xml_folder_path, migration.file_path)
+        content = None
+        try:
+            with open(file_path) as fp:
+                content = fp.read()
+            xml_source = file_path
+        except IOError:
+            uri = get_article_meta_uri(pid, collection)
+            content = _request_xml_content(uri)
+            xml_source = uri
+        if content:
+            controller.add_xml_and_v3(pid, None, content, xml_source)
+    except (
+            IOError,
+            ) as e:
+        LOGGER.error("Unable to import data %s %s" % (pid, e))
+        return None
+    except (
+            controller.SaveMigrationError,
+            ) as e:
+        LOGGER.exception("Unable to update migration data %s %s" % (pid, e))
+        return None
 
 
 #############################################################

@@ -112,8 +112,11 @@ class IdRequestArguments:
 
     @property
     def partial_body(self):
-        body = Body(self.xmltree)
-        for text in body.main_body_texts:
-            if text:
-                return {"partial_body": text}
+        try:
+            body = Body(self.xmltree)
+            for text in body.main_body_texts:
+                if text:
+                    return {"partial_body": text}
+        except AttributeError:
+            return {"partial_body": ''}
         return {"partial_body": ''}

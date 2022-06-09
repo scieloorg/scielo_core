@@ -27,11 +27,18 @@ def register_migration(docs_jsonl_file_path, issns_file_path, skip_update=False)
         fp.write("\n".join(issns))
 
 
-def harvest_journals_xmls(issns_file_path):
+def pull_data_from_new_website(issns_file_path):
     with open(issns_file_path) as fp:
         for issn in fp.readlines():
             issn = issn.strip()
-            tasks.harvest_journal_xmls(issn)
+            tasks.pull_data_from_new_website(issn)
+
+
+def pull_data_from_old_website(issns_file_path, xml_folder_path, collection):
+    with open(issns_file_path) as fp:
+        for issn in fp.readlines():
+            issn = issn.strip()
+            tasks.pull_data_from_old_website(issn, xml_folder_path, collection)
 
 
 def migrate_journals_xmls(issns_file_path):
@@ -59,6 +66,14 @@ def cli(argv=None):
         help="Register data from artigo.mst to control the migration",
         description="Register data from artigo.mst to control the migration",
     )
+
+    parser_register_migration.add_argument(
+        "--skip_update",
+        action='store_true',
+        help="Skip update",
+        default=False,
+    )
+
     parser_register_migration.add_argument(
         "docs_jsonl_file_path",
         help="jsonl file path which contains some metadata from artigo.mst",
@@ -67,26 +82,38 @@ def cli(argv=None):
         "issns_file_path",
         help="file path to save an ISSN list",
     )
-    parser_register_migration.add_argument(
-        "--skip_update",
-        type=bool,
-        help="Skip update",
+    parser_pull_new = subparsers.add_parser(
+        "pull_new",
+        help="Pull data from new website",
+        description="Pull data from new website",
     )
-
-    parser_harvest_journals_xmls = subparsers.add_parser(
-        "harvest_xml",
-        help="Harvest the XML from the new website",
-        description="Harvest the XML from the new website",
-    )
-    parser_harvest_journals_xmls.add_argument(
+    parser_pull_new.add_argument(
         "issns_file_path",
         help="file path to save an ISSN list",
     )
 
+    parser_pull_data_from_old_website = subparsers.add_parser(
+        "pull_old",
+        help="Pull data from old website",
+        description="Pull data from old website",
+    )
+    parser_pull_data_from_old_website.add_argument(
+        "issns_file_path",
+        help="file path to save an ISSN list",
+    )
+    parser_pull_data_from_old_website.add_argument(
+        "xml_folder_path",
+        help="XML folder path",
+    )
+    parser_pull_data_from_old_website.add_argument(
+        "collection",
+        help="collection acronym",
+    )
+
     parser_migrate_journals_xmls = subparsers.add_parser(
         "migrate_xml",
-        help="Harvest the XML from the new website",
-        description="Harvest the XML from the new website",
+        help="Migrate data",
+        description="Migrate data",
     )
     parser_migrate_journals_xmls.add_argument(
         "issns_file_path",
@@ -95,8 +122,8 @@ def cli(argv=None):
 
     parser_get_xml = subparsers.add_parser(
         "get_xml",
-        help="Harvest the XML from the new website",
-        description="Harvest the XML from the new website",
+        help="Get XML",
+        description="Get XML",
     )
     parser_get_xml.add_argument(
         "v2",
@@ -111,8 +138,11 @@ def cli(argv=None):
     if args.command == "register_migration":
         register_migration(
             args.docs_jsonl_file_path, args.issns_file_path, args.skip_update)
-    elif args.command == "harvest_xml":
-        harvest_journals_xmls(args.issns_file_path)
+    elif args.command == "pull_new":
+        pull_data_from_new_website(args.issns_file_path)
+    elif args.command == "pull_old":
+        pull_data_from_old_website(
+            args.issns_file_path, args.xml_folder_path, args.collection)
     elif args.command == "migrate_xml":
         migrate_journals_xmls(args.issns_file_path)
     elif args.command == "get_xml":

@@ -32,6 +32,7 @@ class Migration(Document):
     file_path = StringField()
 
     xml = StringField()
+    xml_source = StringField()
 
     issn = StringField()
     year = StringField()

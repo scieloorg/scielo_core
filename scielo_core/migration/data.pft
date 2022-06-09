@@ -1,7 +1,7 @@
 /* nohup ./mx ../bases/artigo/artigo btell=0 tp=h lw=9999 "pft=@x.pft" now > pids_2022-06-02.txt& */
 ,if a(v41) then
 ,'{',
-    ,'"v2": "',v880,'", ',
+    ,'"v2": "',v880^*,'", ',
     ,'"aop_pid": "',v881,'", ',
     ,'"file_path": "',replace(v702, '\', '/'),'", ',
     ,'"issn": "',v35,'", ',
