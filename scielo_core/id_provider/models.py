@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from mongoengine import (
@@ -7,10 +8,12 @@ from mongoengine import (
     StringField,
     DateTimeField,
     DictField,
-    FileField,
+    IntField,
 )
-from mongoengine.fields import GridFSError
 
+
+LOGGER = logging.getLogger(__name__)
+LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 DOI_CREATION_STATUS = ('auto_assigned', 'assigned_by_editor', 'UNK')
 DOI_REGISTRATION_STATUS = ('registered', 'not_registered', 'UNK')
@@ -130,7 +133,7 @@ class Package(Document):
     extra = DictField()
 
     # zipfile
-    zip_file_path = FileField()
+    xml = StringField()
 
     # datas deste registro
     created = DateTimeField()
@@ -138,7 +141,7 @@ class Package(Document):
 
     meta = {
         'db_alias': 'scielo_core',
-        'collection': 'id_provider',
+        'collection': 'id_provider_docs',
         'indexes': [
             'v3',
             'v2',
@@ -159,23 +162,6 @@ class Package(Document):
             'partial_body'
         ]
     }
-
-    @property
-    def zip_file(self):
-        return self.zip_file_path.read()
-
-    @zip_file.setter
-    def zip_file(self, file_path):
-        try:
-            self.zip_file_path.delete()
-        except GridFSError:
-            pass
-
-        with open(file_path, 'rb') as fd:
-            try:
-                self.zip_file_path.put(fd, content_type='application/zip')
-            except GridFSError:
-                self.zip_file_path.replace(fd, content_type='application/zip')
 
     def as_dict(self, to_compare=False):
         """
@@ -301,3 +287,55 @@ class Package(Document):
                 return
 
         self.article_titles.append(item)
+
+
+class Requests(Document):
+
+    # _id - generated automatically
+    user = StringField()
+    status = StringField()
+
+    # input
+    in_v3 = StringField()
+    in_v2 = StringField()
+    in_aop_pid = StringField()
+
+    # output
+    out_v3 = StringField()
+    out_v2 = StringField()
+    out_aop_pid = StringField()
+
+    diffs = IntField()
+    # datas deste registro
+    created = DateTimeField()
+    updated = DateTimeField()
+
+    meta = {
+        'db_alias': 'scielo_core',
+        'collection': 'id_provider_requests',
+        'indexes': [
+            'in_v3',
+            'in_v2',
+            'in_aop_pid',
+            'out_v3',
+            'out_v2',
+            'out_aop_pid',
+        ]
+    }
+
+    def update_diffs(self):
+        inputs = (self.in_v2, self.in_v3, self.in_aop_pid)
+        outputs = (self.out_v2, self.out_v3, self.out_aop_pid)
+        d = 0
+        for i, o in zip(inputs, outputs):
+            LOGGER.debug(f"i: [{i}], o: [{o}]")
+            if i != o:
+                d += 1
+        self.diffs = d
+
+    def save(self, *args, **kwargs):
+        if not self.created:
+            self.created = utcnow()
+        self.updated = utcnow()
+
+        return super(Requests, self).save(*args, **kwargs)

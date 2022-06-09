@@ -3,15 +3,17 @@ import json
 import logging
 import sys
 
-from scielo_core.migration import tasks
+from scielo_core.migration import tasks, controller
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
+def get_xml(v2):
+    print(controller.get_xml(v2))
+
+
 def register_migration(docs_jsonl_file_path, issns_file_path, skip_update=False):
-    print(skip_update)
-    print(type(skip_update))
     with open(docs_jsonl_file_path, "r") as fp:
         issns = set()
         for row in fp.readlines():
@@ -72,7 +74,7 @@ def cli(argv=None):
     )
 
     parser_harvest_journals_xmls = subparsers.add_parser(
-        "harvest_journals_xmls",
+        "harvest_xml",
         help="Harvest the XML from the new website",
         description="Harvest the XML from the new website",
     )
@@ -82,12 +84,22 @@ def cli(argv=None):
     )
 
     parser_migrate_journals_xmls = subparsers.add_parser(
-        "migrate_journals_xmls",
+        "migrate_xml",
         help="Harvest the XML from the new website",
         description="Harvest the XML from the new website",
     )
     parser_migrate_journals_xmls.add_argument(
         "issns_file_path",
+        help="file path to save an ISSN list",
+    )
+
+    parser_get_xml = subparsers.add_parser(
+        "get_xml",
+        help="Harvest the XML from the new website",
+        description="Harvest the XML from the new website",
+    )
+    parser_get_xml.add_argument(
+        "v2",
         help="file path to save an ISSN list",
     )
 
@@ -99,10 +111,12 @@ def cli(argv=None):
     if args.command == "register_migration":
         register_migration(
             args.docs_jsonl_file_path, args.issns_file_path, args.skip_update)
-    elif args.command == "harvest_journals_xmls":
+    elif args.command == "harvest_xml":
         harvest_journals_xmls(args.issns_file_path)
-    elif args.command == "migrate_journals_xmls":
+    elif args.command == "migrate_xml":
         migrate_journals_xmls(args.issns_file_path)
+    elif args.command == "get_xml":
+        get_xml(args.v2)
     else:
         parser.print_help()
 

@@ -24,6 +24,10 @@ def _request_id_for_a_xml_list(source_file_path, output_file_path):
                 out.write(row)
 
 
+def get_xml(v3):
+    print(view.get_xml(v3))
+
+
 def cli(argv=None):
     if argv is None:
         argv = sys.argv
@@ -49,6 +53,15 @@ def cli(argv=None):
         "output_file_path", help="result"
     )
 
+    parser_get_xml = subparsers.add_parser(
+        "get_xml",
+        help="Request ID for a bunch of XML files",
+        description="Request ID for a bunch of XML files",
+    )
+    parser_get_xml.add_argument(
+        "v3", help="v3"
+    )
+
     args = parser.parse_args()
     # todas as mensagens serão omitidas se level > 50
     logging.basicConfig(
@@ -56,6 +69,8 @@ def cli(argv=None):
     )
     if args.command == "request_id":
         _request_id_for_a_xml_list(args.source_file_path, args.output_file_path)
+    elif args.command == "get_xml":
+        get_xml(args.v3)
     else:
         parser.print_help()
 

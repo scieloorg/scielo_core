@@ -13,3 +13,6 @@ class DBCreateDocumentError(Exception):
 class DBSaveNotUniqueError(Exception):
     ...
 
+
+class InvalidXMLError(Exception):
+	...

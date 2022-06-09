@@ -1,20 +1,30 @@
+import logging
+
 from http import HTTPStatus
+
 from scielo_core.id_provider import (
     controller,
-    xml_sps,
+    exceptions,
 )
-from scielo_core.basic.xml_sps_zip_file import get_xml_content
 
 
-def request_document_id(pkg_file_path):
-    arguments = xml_sps.IdRequestArguments(pkg_file_path)
+LOGGER = logging.getLogger(__name__)
+LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
-    response = controller.request_document_ids(**arguments.data)
 
-    if controller.is_diff(arguments.data, response):
-        # return updated XML
-        xml = get_xml_content(pkg_file_path)
-        return xml.decode("utf-8")
+def request_document_id(pkg_file_path, username):
+    try:
+        response = controller.request_document_ids(
+            pkg_file_path, username)
+    except exceptions.RequestDocumentIdError as e:
+        LOGGER.debug(e)
+        return HTTPStatus.INTERNAL_SERVER_ERROR
+    except exceptions.DocumentIsUpdatedError as e:
+        LOGGER.debug(e)
+        return HTTPStatus.CREATED
+    else:
+        return response
 
-    # return HTTP status code created (201)
-    return HTTPStatus.CREATED
+
+def get_xml(v3):
+    return controller.get_xml(v3)

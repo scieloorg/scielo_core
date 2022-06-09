@@ -5,9 +5,8 @@ from mongoengine import (
     Document,
     StringField,
     DateTimeField,
-    FileField,
+    BooleanField,
 )
-from mongoengine.fields import GridFSError
 
 
 LOGGER = logging.getLogger(__name__)
@@ -32,7 +31,7 @@ class Migration(Document):
 
     file_path = StringField()
 
-    xml_file_path = FileField()
+    xml = StringField()
 
     issn = StringField()
     year = StringField()
@@ -42,6 +41,8 @@ class Migration(Document):
     v93 = StringField()
 
     status = StringField(choices=MIGRATION_STATUS)
+    status_msg = StringField()
+    is_aop = BooleanField()
 
     # datas deste registro
     created = DateTimeField()
@@ -49,7 +50,7 @@ class Migration(Document):
 
     meta = {
         'db_alias': 'scielo_core',
-        'collection': 'migration',
+        'collection': 'id_provider_migration',
         'indexes': [
             'v3',
             'v2',
@@ -59,27 +60,9 @@ class Migration(Document):
             'order',
             'v91',
             'v93',
+            'status',
         ]
     }
-
-    @property
-    def zip_file(self):
-        return self.xml_file_path.read()
-
-    @zip_file.setter
-    def zip_file(self, file_path):
-        try:
-            self.xml_file_path.delete()
-        except GridFSError as e:
-            LOGGER.debug("Unable to delete %s %s" % (self.xml_file_path, e))
-
-        with open(file_path, 'rb') as fd:
-            try:
-                LOGGER.debug("Try to put %s %s" % (self.xml_file_path, e))
-                self.xml_file_path.put(fd, content_type='application/zip')
-            except GridFSError:
-                LOGGER.debug("Try to replace %s %s" % (self.xml_file_path, e))
-                self.xml_file_path.replace(fd, content_type='application/zip')
 
     def save(self, *args, **kwargs):
         if not self.created:

@@ -1,6 +1,7 @@
 import logging
+from http import HTTPStatus
 
-from scielo_core.basic import mongo_db, xml_sps_zip_file
+from scielo_core.basic import mongo_db
 from scielo_core.id_provider import (
     models,
     exceptions,
@@ -16,7 +17,62 @@ LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
-def request_document_ids(
+def get_xml(v3):
+    try:
+        doc = _fetch_most_recent_document(v3=v3)
+        return doc.xml
+    except exceptions.FetchMostRecentRecordError:
+        return
+
+
+def request_document_ids(pkg_file_path, user=None):
+    LOGGER.debug(pkg_file_path)
+
+    arguments = xml_sps.IdRequestArguments(pkg_file_path)
+
+    request = _create_request(arguments.data, user)
+
+    try:
+        doc = _request_document_ids(**arguments.data)
+        data = doc.as_dict()
+        _update_request(request, data)
+    except exceptions.DocumentIsUpdatedError:
+        data = arguments.data
+        _update_request(request, data)
+    else:
+        return doc.xml
+
+
+def _update_request(request, data):
+    try:
+        request.out_v2 = data['v2']
+        request.out_v3 = data['v3']
+        request.out_aop_pid = data['aop_pid']
+        request.status = "requested"
+        request.update_diffs()
+        request.save()
+        LOGGER.debug("Update request done")
+    except Exception as e:
+        LOGGER.debug("Error: Update request done")
+
+
+def _create_request(data, user):
+    try:
+        request = models.Requests()
+        request.user = user
+        request.in_v2 = data['v2']
+        request.in_v3 = data['v3']
+        request.in_aop_pid = data['aop_pid']
+        request.status = "request"
+        request.save()
+        LOGGER.debug("Registered request")
+    except Exception as e:
+        request = None
+        LOGGER.debug("Error: Register request")
+    return request
+
+
+def _request_document_ids(
         v2, v3, aop_pid,
         doi_with_lang,
         issns,
@@ -32,8 +88,10 @@ def request_document_ids(
     """
     Obtém registro consultando com os dados do documento
     Cria o registro
-    Retorna dicionário cujas chaves são:
-        input, registered, created, exception
+    
+    Returns
+    -------
+    dict
     """
     document = Document(
         v2, v3, aop_pid,
@@ -48,40 +106,78 @@ def request_document_ids(
         zip_file_path,
         extra,
     )
-    document_attribs = document.attribs
-    LOGGER.debug("Document %s" % document_attribs)
+    input_data = document.attribs
+    LOGGER.debug("Document %s" % input_data)
 
     # obtém o documento registrado
-    registered = _get_registered_document(document_attribs)
     try:
-        registered_data = registered.as_dict()
-    except AttributeError:
+        registered_data = _get_registered_document_data(input_data)
+    except exceptions.DocumentDoesNotExistError:
+        LOGGER.debug("DocumentDoesNotExistError")
         registered_data = {}
+    except exceptions.GetRegisteredDocumentError as e:
+        raise exceptions.RequestDocumentIdError(e)
+
+    data = _get_data_to_register(input_data, registered_data)
+    if not data:
+        LOGGER.debug("Document is already registered")
+        raise exceptions.DocumentIsUpdatedError(
+            "Document is already registered"
+        )
+
+    try:
+        LOGGER.debug("Register document")
+        return _register_document(data)
+    except exceptions.SavingError as e:
+        raise exceptions.RequestDocumentIdError(e)
+
+
+def _get_data_to_register(input_data, registered_data):
+    # novo, atualizado, pendente de atualização
+    # novo: registrar
+    # atualizado: finalizar
+    # pendente de atualização: registrar
+    if not registered_data:
+        # novo
+        input_data['xml'] = xml_sps.get_xml_from_zip_file(
+            input_data['zip_file_path'])
+        return input_data
+
     LOGGER.debug("Registered data: %s" % registered_data)
-
-    # extrai dados do documento registrado
-    recovered_ids = _get_registered_document_ids(registered_data)
-    LOGGER.debug("recovered_ids: %s" % recovered_ids)
-
-    # acrescenta os dados registrados aos dados de entrada
-    data_to_register = _add_pids_to_input_data(
-        document_attribs, recovered_ids, registered_data
-    )
-    LOGGER.debug("data_to_register: %s" % data_to_register)
-
-    if not data_to_register:
+    if not need_to_update(input_data, registered_data):
         # documento já está registrado
-        return registered_data
+        LOGGER.debug("Document is already updated %s" % input_data)
+        return None
 
-    data_to_register["zip_file_path"] = xml_sps.update_ids(
-        data_to_register["zip_file_path"],
-        data_to_register["v3"],
-        data_to_register["v2"],
-        data_to_register["aop_pid"],
+    # add pids
+    data = _update_pids(input_data, registered_data)
+
+    LOGGER.debug("Update xml: %s" % data)
+    data["xml"] = xml_sps.update_ids(
+        data["zip_file_path"],
+        data["v3"],
+        data["v2"],
+        data["aop_pid"],
     )
+    return data
 
-    LOGGER.debug("data_to_register updated: %s" % data_to_register)
-    return _register_document(data_to_register).as_dict()
+
+def _update_pids(input_data, registered_data):
+    """
+    Atualiza input_data com IDs
+    Arguments
+    ---------
+        input_data: dict
+        registered_data: dict
+    Returns
+    -------
+        dict
+    """
+    registered_ids = _get_registered_document_ids(registered_data)
+    LOGGER.debug("registered_ids: %s" % registered_ids)
+    input_data = _add_pid_v3(input_data, registered_data)
+    input_data = _add_aop_pid(input_data, registered_data)
+    return input_data
 
 
 class Document:
@@ -179,14 +275,14 @@ class Document:
 ##############################################
 
 
-def is_diff(input_data, registered_data):
+def need_to_update(input_data, registered_data):
     for k in ("aop_pid", "v2", "v3"):
         if (input_data.get(k) or '') != (registered_data.get(k) or ''):
             return True
     return False
 
 
-def _get_registered_document(document_attribs):
+def _get_registered_document_data(document_attribs):
     """
     Obtém registro consultando com dados do documento:
         - com pid v2
@@ -203,21 +299,38 @@ def _get_registered_document(document_attribs):
 
     """
     # busca o documento com dados do fascículo + pid v2
-    LOGGER.debug("Find document with v2")
-    registered = _get_document_published_in_an_issue(
-        document_attribs, with_v2=True)
-    if not registered:
-        # busca o documento com dados do fascículo, sem pid v2
-        LOGGER.debug("Find document without v2")
-        registered = _get_document_published_in_an_issue(document_attribs)
-    if not registered:
-        # recupera dados de aop, se aplicável
-        LOGGER.debug("Find document published as aop")
-        registered = _get_document_published_as_aop(document_attribs)
+    try:
+        LOGGER.debug("Find document with v2")
+        registered = _get_document_published_in_an_issue(
+            document_attribs, with_v2=True)
+        if not registered:
+            # busca o documento com dados do fascículo, sem pid v2
+            LOGGER.debug("Find document without v2")
+            registered = _get_document_published_in_an_issue(document_attribs)
+        if not registered:
+            # recupera dados de aop, se aplicável
+            LOGGER.debug("Find document published as aop")
+            registered = _get_document_published_as_aop(document_attribs)
 
-    if registered:
-        LOGGER.debug("Find the most recent version")
-        return _fetch_most_recent_document(v3=registered.as_dict()["v3"])
+    except (
+            exceptions.QueryingDocumentInIssueError,
+            exceptions.QueryingDocumentAsAOPError,
+            exceptions.FetchMostRecentRecordError,
+            ) as e:
+        raise exceptions.GetRegisteredDocumentError(e)
+
+    try:
+        doc = registered.as_dict()
+    except AttributeError:
+        raise exceptions.DocumentDoesNotExistError(
+            "Document does not exist %s" % document_attribs)
+
+    try:
+        return _fetch_most_recent_document(v3=doc["v3"]).as_dict()
+    except KeyError as e:
+        raise exceptions.GetRegisteredDocumentError(e)
+    except exceptions.FetchMostRecentRecordError as e:
+        raise exceptions.GetRegisteredDocumentError(e)
 
 
 def _get_registered_document_ids(registered_data):
@@ -315,7 +428,7 @@ def _get_document_published_in_an_issue(document_attribs, with_v2=False):
     params = _get_query_parameters(document_attribs, with_v2=with_v2)
     try:
         return _fetch_most_recent_document(**params)
-    except exceptions.FetchRecordsError as e:
+    except exceptions.FetchMostRecentRecordError as e:
         raise exceptions.QueryingDocumentInIssueError(
             f"Querying document in an issue error: {e}"
         )
@@ -338,60 +451,54 @@ def _get_document_published_as_aop(document_attribs):
     params = _get_query_parameters(document_attribs, aop_version=True)
     try:
         return _fetch_most_recent_document(**params)
-    except exceptions.FetchRecordsError as e:
+    except exceptions.FetchMostRecentRecordError as e:
         raise exceptions.QueryingDocumentAsAOPError(
             f"Querying document as aop error: {e}"
         )
 
 
-def _add_pids_to_input_data(document_data, recovered_ids, registered_data):
+def _add_aop_pid(input_data, registered_data):
     """
-    Atualiza document_data com IDs
+    Atualiza input_data com aop_pid se aplicável
 
     Arguments
     ---------
-        document_data: dict
-        recovered_ids: dict
+        input_data: dict
+        registered_data: dict
         registered_data: dict
 
     Returns
     -------
         dict
     """
-    if not recovered_ids:
-        # retorna os dados do documento enviado
-        return _add_pid_v3(document_data)
-
     if (not registered_data.get("volume") and
             not registered_data.get("number") and
             not registered_data.get("suppl")):
-        recovered_ids["aop_pid"] = recovered_ids.pop("v2")
-
-    document_data.update(recovered_ids)
-    if not is_diff(document_data, recovered_ids):
-        return None
-
-    return document_data
+        input_data["aop_pid"] = registered_data["v2"]
+    return input_data
 
 
 ##############################################
 
 
-def _add_pid_v3(document_attribs):
+def _add_pid_v3(input_data, registered_data):
     """
-    Garante que document_attribs tenha um v3 inédito
+    Garante que input_data tenha um v3 inédito
 
     Arguments
     ---------
-        document_attribs: dict
+        input_data: dict
 
     Returns
     -------
         dict
     """
-    if not document_attribs["v3"] or _is_registered_v3(document_attribs["v3"]):
-        document_attribs["v3"] = _get_unique_v3()
-    return document_attribs
+    if registered_data:
+        input_data["v3"] = registered_data["v3"]
+    else:
+        if not input_data["v3"] or _is_registered_v3(input_data["v3"]):
+            input_data["v3"] = _get_unique_v3()
+    return input_data
 
 
 def _get_unique_v3():
@@ -408,28 +515,28 @@ def _get_unique_v3():
             return generated
 
 
-def _register_document(document_attribs):
+def _register_document(document_data):
     try:
         pkg = models.Package()
 
-        pkg.v3 = document_attribs["v3"]
+        pkg.v3 = document_data["v3"]
 
         # outros tipos de ID
-        pkg.v2 = document_attribs["v2"]
-        pkg.aop_pid = document_attribs["aop_pid"]
+        pkg.v2 = document_data["v2"]
+        pkg.aop_pid = document_data["aop_pid"]
 
         # dados que identificam o documento e que sempre estão presentes
-        for item in document_attribs["issns"]:
+        for item in document_data["issns"]:
             pkg.update_issns(item["type"], item["value"])
-        pkg.pub_year = document_attribs["pub_year"]
+        pkg.pub_year = document_data["pub_year"]
 
         # dados que identificam o documento e não são obrigatórios
-        for item in document_attribs["doi_with_lang"]:
+        for item in document_data["doi_with_lang"]:
             pkg.update_doi(item["lang"], item["value"])
 
         # authors and collab
-        pkg.collab = document_attribs["collab"]
-        for item in document_attribs["authors"]:
+        pkg.collab = document_data["collab"]
+        for item in document_data["authors"]:
             pkg.update_authors(
                 item["surname"], item["given_names"],
                 item["orcid"],
@@ -437,32 +544,34 @@ def _register_document(document_attribs):
             )
 
         # títulos do documento
-        for item in document_attribs["article_titles"]:
+        for item in document_data["article_titles"]:
             pkg.update_article_titles(
                 item["lang"], item["text"])
 
         # dados complementares que identificam o documento
-        pkg.volume = document_attribs["volume"]
-        pkg.number = document_attribs["number"]
-        pkg.suppl = document_attribs["suppl"]
-        pkg.elocation_id = document_attribs["elocation_id"]
-        pkg.fpage = document_attribs["fpage"]
-        pkg.fpage_seq = document_attribs["fpage_seq"]
-        pkg.lpage = document_attribs["lpage"]
+        pkg.volume = document_data["volume"]
+        pkg.number = document_data["number"]
+        pkg.suppl = document_data["suppl"]
+        pkg.elocation_id = document_data["elocation_id"]
+        pkg.fpage = document_data["fpage"]
+        pkg.fpage_seq = document_data["fpage_seq"]
+        pkg.lpage = document_data["lpage"]
 
         # quando o documento não tem metadados suficientes para identificar
         pkg.partial_body = _standardize_partial_body(
-            document_attribs["partial_body"])
+            document_data["partial_body"])
 
-        pkg.zip_file = document_attribs["zip_file_path"]
+        pkg.xml = document_data["xml"]
 
         # dados de processamento / procedimentos
-        pkg.extra = document_attribs["extra"]
+        pkg.extra = document_data["extra"]
 
-        return pkg.save()
+        saved = pkg.save()
+        LOGGER.debug("Saved")
+        return saved
     except Exception as e:
         raise exceptions.SavingError(
-            "Saving error: %s %s %s" % (type(e), e, document_attribs)
+            "Saving error: %s %s %s" % (type(e), e, document_data)
         )
 
 
@@ -485,14 +594,21 @@ def _fetch_records(**kwargs):
 
 
 def _fetch_most_recent_document(**kwargs):
-    registered = _fetch_records(**kwargs)
-
     try:
+        registered = _fetch_records(**kwargs)
         return registered[0]
     except (IndexError, TypeError):
         # não está registrado
         return None
+    except exceptions.FetchRecordsError as e:
+        raise exceptions.FetchMostRecentRecordError(
+            "Unable to _fetch_most_recent_document %s %s %s" %
+            (kwargs, type(e), e)
+        )
 
 
 def _is_registered_v3(v3):
-    return bool(_fetch_most_recent_document(**{"v3": v3}))
+    try:
+        return bool(_fetch_most_recent_document(**{"v3": v3}))
+    except exceptions.FetchMostRecentRecordError:
+        return False

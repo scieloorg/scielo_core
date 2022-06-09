@@ -1,4 +1,4 @@
-from scielo_core.basic import xml_sps_zip_file
+import logging
 
 from lxml import etree
 from packtools.sps.models.article_ids import ArticleIds
@@ -9,9 +9,23 @@ from packtools.sps.models.article_authors import Authors
 from packtools.sps.models.article_titles import ArticleTitles
 from packtools.sps.models.body import Body
 
+from scielo_core.basic import xml_sps_zip_file
+from scielo_core.basic import exceptions
 
-def is_well_formed(xml_content):
-    return etree.fromstring(xml_content)
+
+LOGGER = logging.getLogger(__name__)
+LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+
+def is_valid_xml(xml_content):
+    try:
+        return etree.fromstring(xml_content)
+    except etree.XMLSyntaxError as e:
+        raise exceptions.InvalidXMLError(e)
+
+
+def get_xml_from_zip_file(zip_file_path):
+    return xml_sps_zip_file.get_xml_content(zip_file_path)
 
 
 def update_ids(zip_file_path, v3, v2, aop_pid):
@@ -24,9 +38,8 @@ def update_ids(zip_file_path, v3, v2, aop_pid):
     article_ids.aop_pid = aop_pid
 
     # update XML
-    return xml_sps_zip_file.update_zip_file_xml(
-        zip_file_path, etree.tostring(article_ids._xmltree)
-    )
+    return etree.tostring(
+        article_ids._xmltree, encoding="utf-8").decode("utf-8")
 
 
 class IdRequestArguments:

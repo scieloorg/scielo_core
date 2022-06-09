@@ -26,13 +26,16 @@ def get_xml_content(xml_sps_file_path):
         with ZipFile(xml_sps_file_path) as zf:
             for item in zf.namelist():
                 if item.endswith(".xml"):
-                    return zf.read(item)
+                    return zf.read(item).decode("utf-8")
     except BadZipFile:
         LOGGER.info(
             "Try to get xml content from xml file %s" % xml_sps_file_path
         )
         with open(xml_sps_file_path, "rb") as fp:
-            return fp.read()
+            return fp.read().decode("utf-8")
+    except Exception as e:
+        LOGGER.exception("Unable to get_xml_content %s %s %s" %
+                         (xml_sps_file_path, type(e), e))
     LOGGER.info("...Get xml content from %s" % xml_sps_file_path)
 
 
@@ -65,7 +68,7 @@ def update_zip_file_xml(xml_sps_file_path, content):
     with ZipFile(xml_sps_file_path, "w") as zf:
         zf.writestr(xml_file_path, content)
         LOGGER.info("Try to write xml %s %s %s" %
-                     (xml_sps_file_path, xml_file_path, content[:100]))
+                    (xml_sps_file_path, xml_file_path, content[:100]))
 
     return xml_sps_file_path
 

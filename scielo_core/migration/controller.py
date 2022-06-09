@@ -3,7 +3,9 @@ import logging
 from opac_schema.v1.models import Article
 
 from scielo_core.basic import mongo_db
+from scielo_core.basic import exceptions
 from scielo_core.migration import models
+from scielo_core.id_provider import xml_sps
 
 from scielo_core.config import DATABASE_CONNECT_URL
 from scielo_core.config import WEBSITE_DB_URI
@@ -22,6 +24,36 @@ class FetchArticleError(Exception):
 
 class FetchMigrationError(Exception):
     ...
+
+
+class InvalidXMLError(Exception):
+    ...
+
+
+class SaveMigrationError(Exception):
+    ...
+
+
+class GetPIDsError(Exception):
+    ...
+
+
+def _save_migration(migration):
+    try:
+        migration.save()
+    except Exception as e:
+        raise SaveMigrationError(e)
+
+
+def update_status(migration, status, status_msg):
+    migration.status = status
+    migration.status_msg = status_msg
+    _save_migration(migration)
+
+
+def get_xml(v2):
+    records = _fetch_migration_records(v2=v2)
+    return records[0].xml.decode("utf-8")
 
 
 def get_article(pid):
@@ -54,19 +86,21 @@ def get_migration(v2):
     try:
         return _fetch_migration_records(**{"v2": v2})[0]
     except IndexError:
-        LOGGER.debug("Not found %s" % v2)
-        return None
+        raise FetchMigrationError("Migration record %s not found" % v2)
 
 
-def save_migration(v2, aop_pid, file_path, issn, year, order, v91, v93, skip_update=False):
+def create_migration(v2, aop_pid, file_path, issn, year, order, v91, v93,
+                     is_aop, skip_update=False):
     try:
-        migration = _fetch_migration_records(**{"v2": v2})[0]
+        migration = get_migration(v2)
+    except FetchMigrationError:
+        migration = models.Migration()
+        migration.v2 = v2
+    else:
         if skip_update:
             LOGGER.debug("Skip update %s" % v2)
             return migration
-    except IndexError:
-        migration = models.Migration()
-        migration.v2 = v2
+
     migration.status = 'GET_XML'
 
     # outros tipos de ID
@@ -78,37 +112,48 @@ def save_migration(v2, aop_pid, file_path, issn, year, order, v91, v93, skip_upd
     migration.order = order
     migration.v91 = v91
     migration.v93 = v93
-    migration.save()
+    migration.is_aop = is_aop
+    _save_migration(migration)
     return migration
 
 
-def update_migration(v2, v3, zip_file):
+def add_xml_and_v3(v2, v3, xml):
     try:
         migration = _fetch_migration_records(**{"v2": v2})[0]
     except IndexError:
         raise FetchMigrationError("Unable to find migration: %s" % v2)
 
     migration.v3 = v3
-    migration.zip_file = zip_file
-    if zip_file:
+    try:
+        xml_sps.is_valid_xml(xml)
+        migration.xml = xml
         migration.status = "TO_MIGRATE"
-    migration.save()
+        migration.status_msg = ""
+    except exceptions.InvalidXMLError as e:
+        migration.status_msg = str(e)
+
+    _save_migration(migration)
     return migration
 
 
-def get_pids(issn, order_by=None, status=None):
+def get_pids(issn, status, is_aop=None, order_by=None):
     page = 0
+
+    kwargs = {"issn": issn}
+    if status:
+        kwargs['status'] = status
+    if order_by:
+        kwargs['order_by'] = order_by
+    if is_aop in (True, False):
+        kwargs['is_aop'] = is_aop
+
     while True:
         page += 1
         try:
-            kwargs = {"issn": issn, "page": page}
-            if status:
-                kwargs['status'] = status
-            if order_by:
-                kwargs['order_by'] = order_by
+            kwargs['page'] = page
             records = _fetch_migration_records(**kwargs)
         except Exception as e:
-            LOGGER.exception(
+            raise GetPIDsError(
                 "Unable to fetch records %s %s %s %s" %
                 (issn, page, type(e), e)
             )
