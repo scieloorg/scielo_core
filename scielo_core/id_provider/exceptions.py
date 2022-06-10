@@ -33,3 +33,11 @@ class DocumentDoesNotExistError(Exception):
 
 class DocumentIsUpdatedError(Exception):
     ...
+
+
+class NotFoundXMLError(Exception):
+    ...
+
+
+class UnableToCreateXMLError(Exception):
+    ...

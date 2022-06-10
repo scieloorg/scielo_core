@@ -3,10 +3,14 @@ import json
 import logging
 import sys
 
+from scielo_core import config
 from scielo_core.migration import tasks, controller
+
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+LOGGER.basicConfig(
+    filename=config.MIGRATION_LOGFILE, encoding='utf-8', level=logging.DEBUG)
 
 
 def get_xml(v2):

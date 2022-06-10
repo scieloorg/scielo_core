@@ -2,12 +2,12 @@ import os
 
 
 # mongodb://my_user:my_password@127.0.0.1:27017/my_db
-DATABASE_CONNECT_URL = (
-    os.environ.get("DATABASE_CONNECT_URL") or
+ID_PROVIDER_DB_URI = (
+    os.environ.get("ID_PROVIDER_DB_URI") or
     "mongodb://127.0.0.1:27017/my_id_provider"
 )
 WEBSITE_DB_URI = (
-    os.environ.get("DATABASE_CONNECT_URL") or
+    os.environ.get("WEBSITE_DB_URI") or
     "mongodb://127.0.0.1:27017/my_website"
 )
 
@@ -26,6 +26,8 @@ HARVEST_XMLS_QUEUE = (
     os.environ.get("HARVEST_XMLS_QUEUE") or 'migr_high_priority')
 MIGRATE_XMLS_QUEUE = (
     os.environ.get("MIGRATE_XMLS_QUEUE") or 'migr_high_priority')
+
+MIGRATION_LOGFILE = os.environ.get('MIGRATION_LOGFILE') or 'migration.log'
 
 
 def run_concurrently():

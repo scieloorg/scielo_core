@@ -117,7 +117,7 @@ def create_migration(v2, aop_pid, file_path, issn, year, order, v91, v93,
     return migration
 
 
-def add_xml_and_v3(v2, v3, xml, xml_source):
+def add_xml_and_v3(v2, v3, xml_id):
     try:
         migration = _fetch_migration_records(**{"v2": v2})[0]
     except IndexError:
@@ -126,10 +126,7 @@ def add_xml_and_v3(v2, v3, xml, xml_source):
     if v3:
         migration.v3 = v3
     try:
-        xml_sps.is_valid_xml(xml)
-        migration.xml = xml
-        migration.xml_source = xml_source
-
+        migration.xml_id = xml_id
         migration.status = "TO_MIGRATE"
         migration.status_msg = ""
     except exceptions.InvalidXMLError as e:

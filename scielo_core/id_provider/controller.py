@@ -8,10 +8,10 @@ from scielo_core.id_provider import (
     v3_gen,
     xml_sps,
 )
-from scielo_core.config import DATABASE_CONNECT_URL
+from scielo_core.config import ID_PROVIDER_DB_URI
 
 
-conn = mongo_db.mk_connection(DATABASE_CONNECT_URL, 'scielo_core')
+conn = mongo_db.mk_connection(ID_PROVIDER_DB_URI, 'scielo_core')
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -40,7 +40,27 @@ def request_document_ids(pkg_file_path, user=None):
         data = arguments.data
         _update_request(request, data)
     else:
-        return doc.xml
+        return get_registered_xml(doc.xml_id)
+
+
+def get_registered_xml(id):
+    try:
+        xml_content = models.XML(id=id)
+        return xml_content.xml
+    except Exception as e:
+        raise exceptions.NotFoundXMLError(e)
+
+
+def register_xml(xml, xml_source):
+    try:
+        xml_sps.is_valid_xml(xml)
+        xml_content = models.XML()
+        xml_content.xml = xml
+        xml_content.xml_source = xml_source
+        xml_content.save()
+        return xml_content.id
+    except Exception as e:
+        raise exceptions.UnableToCreateXMLError(e)
 
 
 def _update_request(request, data):

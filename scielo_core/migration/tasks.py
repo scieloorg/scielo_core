@@ -15,7 +15,12 @@ from scielo_core.config import (
     get_article_meta_uri,
 )
 from scielo_core.basic import xml_sps_zip_file
-from scielo_core.id_provider import xml_sps, exceptions
+from scielo_core.id_provider import (
+    xml_sps,
+    exceptions,
+    get_registered_xml,
+    register_xml,
+)
 from scielo_core.migration import controller
 from scielo_core.id_provider.view import request_document_id, HTTPStatus
 
@@ -33,6 +38,7 @@ class UnableToCreateXMLZipFileError(Exception):
 
 class PullDataFromNewWebsiteError(Exception):
     ...
+
 
 class PullXMLError(Exception):
     ...
@@ -60,6 +66,98 @@ def task_example(data):
 
 ###########################################
 
+def _request_xml(uri, timeout=None):
+    timeout = timeout or 10
+    try:
+        r = requests.get(uri, timeout=timeout)
+    except requests.Timeout as e:
+        LOGGER.debug(
+            "Try to request %s again: %s" % (uri, timeout))
+        return _request_xml(uri, timeout=timeout*2)
+    except requests.HTTPError as e:
+        raise PullXMLError(
+            "Unable to get XML content %s: %s %s" % (uri, type(e), e))
+    else:
+        return r.text
+
+
+def _pull_xml(pid, xml_folder_path, file_path, collection):
+    data = None
+    try:
+        data = _get_data_from_new_website(pid)
+    except PullDataFromNewWebsiteError:
+        try:
+            data = _get_data_from_old_website_file_system(xml_folder_path, file_path)
+        except PullXMLError:
+            data = _get_data_from_am(pid, collection)
+    return data
+
+
+def _get_xml_file_uri_and_pid_v3(pid):
+    try:
+        article = controller.get_article(pid)
+        return {"xml": article.xml, "v3": article._id}
+    except controller.FetchArticleError as e:
+        raise PullDataFromNewWebsiteError(
+            "Unable to get article data %s: %s %s" % (pid, type(e), e))
+
+
+def _get_data_from_new_website(pid):
+    """
+    Raises
+    ------
+    PullDataFromNewWebsiteError
+    PullXMLError
+    """
+    data = _get_xml_file_uri_and_pid_v3(pid)
+    uri = data["xml"]
+    pid_v3 = data["v3"]
+    content = _request_xml(uri)
+    return {"source": uri, "v3": pid_v3, "xml": content}
+
+
+def _get_data_from_old_website_file_system(xml_folder_path, file_path):
+    """
+    Raises
+    ------
+    PullXMLError
+    """
+    try:
+        file_path = os.path.join(xml_folder_path, file_path)
+        with open(file_path) as fp:
+            content = fp.read()
+            return {"source": file_path, "xml": content}
+    except IOError as e:
+        raise PullXMLError(e)
+
+
+def _get_data_from_am(pid, collection):
+    """
+    Raises
+    ------
+    PullXMLError
+    """
+    uri = get_article_meta_uri(pid, collection)
+    return {"source": uri, "xml": _request_xml(uri)}
+
+
+def _request_document_id(xml_content):
+    xml_zip_file_path = None
+    try:
+        xml_zip_file_path = _create_tmp_xml_zip_file(
+            f"{pid}.zip", xml_content)
+        resp = request_document_id(xml_zip_file_path, "migration")
+        if resp == HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise exceptions.RequestDocumentIdError
+        if xml_zip_file_path:
+            _delete_temp_xml_zip_file_path(xml_zip_file_path)
+    except Exception as e:
+        if xml_zip_file_path:
+            _delete_temp_xml_zip_file_path(xml_zip_file_path)
+        raise exceptions.RequestDocumentIdError
+
+
+#############################################
 def register_migration(data, skip_update, get_result=None):
     res = task_register_migration.apply_async(
         queue=REGISTER_MIGRATION_QUEUE,
@@ -92,29 +190,30 @@ def task_register_migration(data, skip_update):
 
 ###########################################
 
-def pull_data_from_new_website(issn):
-    res = task_pull_data_from_new_website.apply_async(
+def pull_data_and_request_id(issn):
+    res = task_pull_data_and_request_id.apply_async(
         queue=HARVEST_XMLS_QUEUE,
         args=(issn, ),
     )
-    return _handle_result("task pull_data_from_new_website", res, get_result=False)
+    return _handle_result("task pull_data_and_request_id", res, get_result=False)
 
 
-@app.task(name='task_pull_data_from_new_website')
-def task_pull_data_from_new_website(issn):
+@app.task(name='task_pull_data_and_request_id')
+def task_pull_data_and_request_id(issn, xml_folder_path, file_path, collection):
     for pid in controller.get_pids(issn, "GET_XML"):
-        LOGGER.debug("Creating xml zip for %s" % pid)
-        # gera o zip do xml obtido do website
-        _pull_data_from_new_website(pid)
+        _pull_data_and_request_id(pid, xml_folder_path, file_path, collection)
 
 
-def _pull_data_from_new_website(pid):
+def _pull_data_and_request_id(pid):
     try:
-        data = _get_xml_file_uri_and_pid_v3(pid)
-        uri = data["xml"]
-        pid_v3 = data["v3"]
-        content = _request_xml_content(uri)
-        controller.add_xml_and_v3(pid, pid_v3, content, uri)
+        LOGGER.debug("Pull data %s" % pid)
+        data = _pull_xml(pid, xml_folder_path, file_path, collection)
+
+        xml_id = register_xml(data["xml"], data["source"])
+        controller.add_xml_and_v3(pid, data.get("v3"), xml_id)
+
+        _request_id_and_update_migration(data["xml"])
+
     except (
             PullDataFromNewWebsiteError,
             PullXMLError,
@@ -127,130 +226,44 @@ def _pull_data_from_new_website(pid):
         LOGGER.exception("Unable to update migration data %s %s" % (pid, e))
         return None
 
-
-def _get_xml_file_uri_and_pid_v3(pid):
-    try:
-        article = controller.get_article(pid)
-        return {"xml": article.xml, "v3": article._id}
-    except controller.FetchArticleError as e:
-        raise PullDataFromNewWebsiteError(
-            "Unable to get article data %s: %s %s" % (pid, type(e), e))
-
-
-def _request_xml_content(uri, timeout=None):
-    timeout = timeout or 10
-    try:
-        r = requests.get(uri, timeout=timeout)
-    except requests.Timeout as e:
-        LOGGER.debug(
-            "Try to request %s again: %s" % (uri, timeout))
-        return _request_xml_content(uri, timeout=timeout*2)
-    except requests.HTTPError as e:
-        raise PullXMLError(
-            "Unable to get XML content %s: %s %s" % (uri, type(e), e))
-    else:
-        return r.text
-
-
-###########################################
-
-def pull_data_from_old_website(issn, xml_folder_path, collection):
-    res = task_pull_data_from_old_website.apply_async(
-        queue=HARVEST_XMLS_QUEUE,
-        args=(issn, xml_folder_path, collection),
-    )
-    return _handle_result("task pull_data_from_old_website", res, get_result=False)
-
-
-@app.task(name='task_pull_data_from_old_website')
-def task_pull_data_from_old_website(issn, xml_folder_path, collection):
-    for pid in controller.get_pids(issn, "GET_XML"):
-        LOGGER.debug("Creating xml zip for %s" % pid)
-        # gera o zip do xml obtido do website
-        _pull_data_from_old_website(pid, xml_folder_path, collection)
-
-
-def _pull_data_from_old_website(pid, xml_folder_path, collection):
-    try:
-        migration = controller.get_migration(pid)
-        file_path = os.path.join(xml_folder_path, migration.file_path)
-        content = None
-        try:
-            with open(file_path) as fp:
-                content = fp.read()
-            xml_source = file_path
-        except IOError:
-            uri = get_article_meta_uri(pid, collection)
-            content = _request_xml_content(uri)
-            xml_source = uri
-        if content:
-            controller.add_xml_and_v3(pid, None, content, xml_source)
-    except (
-            IOError,
-            ) as e:
-        LOGGER.error("Unable to import data %s %s" % (pid, e))
-        return None
-    except (
-            controller.SaveMigrationError,
-            ) as e:
-        LOGGER.exception("Unable to update migration data %s %s" % (pid, e))
-        return None
-
-
 #############################################################
 
 
-def migrate_journal_xmls(issn):
-    res = task_migrate_journal_xmls.apply_async(
+def request_id_for_journal_documents(issn):
+    res = task_request_id_for_journal_documents.apply_async(
         queue=MIGRATE_XMLS_QUEUE,
         args=(issn, ),
     )
-    return _handle_result("task migrate_journal_xmls", res, get_result=False)
+    return _handle_result(
+        "task request_id_for_journal_documents", res, get_result=False)
 
 
-@app.task(name='task_migrate_journal_xmls')
-def task_migrate_journal_xmls(issn):
+@app.task(name='task_request_id_for_journal_documents')
+def task_request_id_for_journal_documents(issn):
     for is_aop in (True, False):
         for pid in controller.get_pids(
                 issn, "TO_MIGRATE", is_aop, order_by="pid"):
-            LOGGER.debug("Migrate %s %s" % (pid, is_aop))
             res = _migrate_xml(pid)
 
 
 def _migrate_xml(pid):
-    status = "TO_MIGRATE"
-    status_msg = ""
+    LOGGER.debug("Migrate %s" % pid)
+    migration = controller.get_migration(pid)
+    xml = get_registered_xml(migration.xml_id)
+    _request_id_and_update_migration(migration, xml)
 
-    xml_zip_file_path = None
+
+def _request_id_and_update_migration(migration, xml):
     try:
-        migration = controller.get_migration(pid)
-        xml_zip_file_path = _create_tmp_xml_zip_file(
-            f"{pid}.zip", migration.xml)
-        resp = request_document_id(xml_zip_file_path, "migration")
-        if resp == HTTPStatus.INTERNAL_SERVER_ERROR:
-            raise exceptions.RequestDocumentIdError
-
+        _request_document_id(xml)
         status = "MIGRATED"
+        status_msg = ""
 
-    except (
-            UnableToCreateXMLZipFileError,
-            exceptions.RequestDocumentIdError,
-            ) as e:
+    except exceptions.RequestDocumentIdError as e:
         status_msg = str(e)
-        LOGGER.exception(
-            "???? migrate xml %s %s %s" %
-            (pid, type(e), str(e))
-        )
+        status = "TO_MIGRATE"
 
-    try:
-        controller.update_status(migration, status, status_msg)
-    except Exception as e:
-        LOGGER.exception(
-            "Unable to migrate xml %s %s %s" %
-            (pid, type(e), str(e))
-        )
-    if xml_zip_file_path:
-        _delete_temp_xml_zip_file_path(xml_zip_file_path)
+    controller.update_status(migration, status, status_msg)
 
 
 #############################################################

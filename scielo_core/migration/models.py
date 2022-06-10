@@ -31,8 +31,7 @@ class Migration(Document):
 
     file_path = StringField()
 
-    xml = StringField()
-    xml_source = StringField()
+    xml_id = StringField()
 
     issn = StringField()
     year = StringField()
@@ -62,6 +61,7 @@ class Migration(Document):
             'v91',
             'v93',
             'status',
+            'xml_id',
         ]
     }
 

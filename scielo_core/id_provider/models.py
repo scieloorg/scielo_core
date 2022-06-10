@@ -132,8 +132,8 @@ class Package(Document):
     # dados de processamento / procedimentos
     extra = DictField()
 
-    # zipfile
-    xml = StringField()
+    # xml_id
+    xml_id = StringField()
 
     # datas deste registro
     created = DateTimeField()
@@ -339,3 +339,30 @@ class Requests(Document):
         self.updated = utcnow()
 
         return super(Requests, self).save(*args, **kwargs)
+
+
+class XML(Document):
+
+    id = StringField()
+    xml = StringField()
+    xml_source = StringField()
+
+    # datas deste registro
+    created = DateTimeField()
+    updated = DateTimeField()
+
+    meta = {
+        'db_alias': 'scielo_core',
+        'collection': 'id_provider_xml',
+        'indexes': [
+            'id',
+        ]
+    }
+
+    def save(self, *args, **kwargs):
+        if not self.created:
+            self.id = str(self._id)
+            self.created = utcnow()
+        self.updated = utcnow()
+
+        return super(XML, self).save(*args, **kwargs)
