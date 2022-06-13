@@ -18,8 +18,6 @@ from scielo_core.basic import xml_sps_zip_file
 from scielo_core.id_provider import (
     xml_sps,
     exceptions,
-    get_registered_xml,
-    register_xml,
 )
 from scielo_core.migration import controller
 from scielo_core.id_provider.view import request_document_id, HTTPStatus
@@ -78,26 +76,37 @@ def _request_xml(uri, timeout=None):
         raise PullXMLError(
             "Unable to get XML content %s: %s %s" % (uri, type(e), e))
     else:
+        if r.status_code != 200:
+            raise PullXMLError("For %s, got %s" % (uri, r.status_code))
         return r.text
 
 
-def _pull_xml(pid, xml_folder_path, file_path, collection):
+def _pull_xml(pid, xml_folder_path, collection):
     data = None
     try:
         data = _get_data_from_new_website(pid)
     except PullDataFromNewWebsiteError:
         try:
-            data = _get_data_from_old_website_file_system(xml_folder_path, file_path)
+            migration = controller.get_migration(pid)
+            data = _get_data_from_old_website_file_system(
+                xml_folder_path, migration.file_path)
         except PullXMLError:
             data = _get_data_from_am(pid, collection)
+    if not data['xml']:
+        raise PullXMLError("Unable to get XML")
     return data
 
 
 def _get_xml_file_uri_and_pid_v3(pid):
     try:
         article = controller.get_article(pid)
+    except (controller.FetchArticleError) as e:
+        raise PullDataFromNewWebsiteError(
+            "Unable to get article data %s: %s %s" % (pid, type(e), e))
+
+    try:
         return {"xml": article.xml, "v3": article._id}
-    except controller.FetchArticleError as e:
+    except (AttributeError) as e:
         raise PullDataFromNewWebsiteError(
             "Unable to get article data %s: %s %s" % (pid, type(e), e))
 
@@ -141,19 +150,21 @@ def _get_data_from_am(pid, collection):
     return {"source": uri, "xml": _request_xml(uri)}
 
 
-def _request_document_id(xml_content):
-    xml_zip_file_path = None
+def push_xml_zip_file(xml_zip_file_path):
     try:
-        xml_zip_file_path = _create_tmp_xml_zip_file(
-            f"{pid}.zip", xml_content)
+        LOGGER.debug("zip %s" % xml_zip_file_path)
+
         resp = request_document_id(xml_zip_file_path, "migration")
+
+        _delete_temp_xml_zip_file_path(xml_zip_file_path)
+
+        LOGGER.debug("resp=%s" % resp)
         if resp == HTTPStatus.INTERNAL_SERVER_ERROR:
             raise exceptions.RequestDocumentIdError
-        if xml_zip_file_path:
-            _delete_temp_xml_zip_file_path(xml_zip_file_path)
+
     except Exception as e:
-        if xml_zip_file_path:
-            _delete_temp_xml_zip_file_path(xml_zip_file_path)
+        LOGGER.debug("Error `push_xml_zip_file` %s" % e)
+        _delete_temp_xml_zip_file_path(xml_zip_file_path)
         raise exceptions.RequestDocumentIdError
 
 
@@ -190,29 +201,31 @@ def task_register_migration(data, skip_update):
 
 ###########################################
 
-def pull_data_and_request_id(issn):
+def pull_data_and_request_id(issn, xml_folder_path, collection):
     res = task_pull_data_and_request_id.apply_async(
         queue=HARVEST_XMLS_QUEUE,
-        args=(issn, ),
+        args=(issn, xml_folder_path, collection),
     )
     return _handle_result("task pull_data_and_request_id", res, get_result=False)
 
 
 @app.task(name='task_pull_data_and_request_id')
-def task_pull_data_and_request_id(issn, xml_folder_path, file_path, collection):
-    for pid in controller.get_pids(issn, "GET_XML"):
-        _pull_data_and_request_id(pid, xml_folder_path, file_path, collection)
+def task_pull_data_and_request_id(issn, xml_folder_path, collection):
+    for is_aop in (True, False):
+        for pid in controller.get_pids(
+                issn, "CREATED", is_aop, order_by="pid"):
+            _pull_data_and_request_id(pid, xml_folder_path, collection)
 
 
-def _pull_data_and_request_id(pid):
+def _pull_data_and_request_id(pid, xml_folder_path, collection):
     try:
         LOGGER.debug("Pull data %s" % pid)
-        data = _pull_xml(pid, xml_folder_path, file_path, collection)
+        data = _pull_xml(pid, xml_folder_path, collection)
 
-        xml_id = register_xml(data["xml"], data["source"])
-        controller.add_xml_and_v3(pid, data.get("v3"), xml_id)
+        controller.add_xml_and_v3(
+            pid, data.get("v3"), data["xml"], data["source"])
 
-        _request_id_and_update_migration(data["xml"])
+        _request_id_and_update_migration(pid, data["xml"])
 
     except (
             PullDataFromNewWebsiteError,
@@ -242,26 +255,33 @@ def request_id_for_journal_documents(issn):
 def task_request_id_for_journal_documents(issn):
     for is_aop in (True, False):
         for pid in controller.get_pids(
-                issn, "TO_MIGRATE", is_aop, order_by="pid"):
-            res = _migrate_xml(pid)
+                issn, "XML", is_aop, order_by="pid"):
+            res = _request_id_and_update_migration(pid)
 
 
-def _migrate_xml(pid):
-    LOGGER.debug("Migrate %s" % pid)
-    migration = controller.get_migration(pid)
-    xml = get_registered_xml(migration.xml_id)
-    _request_id_and_update_migration(migration, xml)
-
-
-def _request_id_and_update_migration(migration, xml):
+def _request_id_and_update_migration(pid, xml=None):
     try:
-        _request_document_id(xml)
+
+        LOGGER.debug("Migrate %s" % pid)
+        migration = controller.get_migration(pid)
+
+    except controller.FetchMigrationError as e:
+        LOGGER.exception("Migration %s not found" % pid)
+        return
+
+    try:
+        xml = xml or migration.xml
+        LOGGER.debug("request_document_id %s" % xml[:10])
+
+        xml_zip_file_path = _create_tmp_xml_zip_file(f"{pid}.zip", xml)
+
+        push_xml_zip_file(xml_zip_file_path)
         status = "MIGRATED"
         status_msg = ""
 
     except exceptions.RequestDocumentIdError as e:
         status_msg = str(e)
-        status = "TO_MIGRATE"
+        status = "XML"
 
     controller.update_status(migration, status, status_msg)
 
@@ -295,7 +315,7 @@ def _create_tmp_xml_zip_file(filename, xml_content):
 def _delete_temp_xml_zip_file_path(xml_zip_file_path):
     try:
         os.unlink(xml_zip_file_path)
-    except IOError:
+    except (IOError, TypeError):
         LOGGER.exception("Unable to delete %s" % xml_zip_file_path)
 
     tempdir = os.path.dirname(xml_zip_file_path)

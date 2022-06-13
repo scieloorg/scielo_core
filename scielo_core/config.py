@@ -28,6 +28,7 @@ MIGRATE_XMLS_QUEUE = (
     os.environ.get("MIGRATE_XMLS_QUEUE") or 'migr_high_priority')
 
 MIGRATION_LOGFILE = os.environ.get('MIGRATION_LOGFILE') or 'migration.log'
+ID_PROVIDER_LOGFILE = os.environ.get('ID_PROVIDER_LOGFILE') or 'id_provider.log'
 
 
 def run_concurrently():

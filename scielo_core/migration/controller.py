@@ -7,11 +7,11 @@ from scielo_core.basic import exceptions
 from scielo_core.migration import models
 from scielo_core.id_provider import xml_sps
 
-from scielo_core.config import DATABASE_CONNECT_URL
+from scielo_core.config import ID_PROVIDER_DB_URI
 from scielo_core.config import WEBSITE_DB_URI
 
 mongo_db.mk_connection(WEBSITE_DB_URI)
-mongo_db.mk_connection(DATABASE_CONNECT_URL, 'scielo_core')
+mongo_db.mk_connection(ID_PROVIDER_DB_URI, 'scielo_core')
 
 
 LOGGER = logging.getLogger(__name__)
@@ -48,6 +48,8 @@ def _save_migration(migration):
 def update_status(migration, status, status_msg):
     migration.status = status
     migration.status_msg = status_msg
+    if status == "MIGRATED":
+        migration.xml = ""
     _save_migration(migration)
 
 
@@ -101,7 +103,7 @@ def create_migration(v2, aop_pid, file_path, issn, year, order, v91, v93,
             LOGGER.debug("Skip update %s" % v2)
             return migration
 
-    migration.status = 'GET_XML'
+    migration.status = 'CREATED'
 
     # outros tipos de ID
     migration.aop_pid = aop_pid
@@ -113,11 +115,13 @@ def create_migration(v2, aop_pid, file_path, issn, year, order, v91, v93,
     migration.v91 = v91
     migration.v93 = v93
     migration.is_aop = is_aop
+    migration.xml = ""
+    migration.xml_source = ""
     _save_migration(migration)
     return migration
 
 
-def add_xml_and_v3(v2, v3, xml_id):
+def add_xml_and_v3(v2, v3, xml, xml_source):
     try:
         migration = _fetch_migration_records(**{"v2": v2})[0]
     except IndexError:
@@ -126,8 +130,9 @@ def add_xml_and_v3(v2, v3, xml_id):
     if v3:
         migration.v3 = v3
     try:
-        migration.xml_id = xml_id
-        migration.status = "TO_MIGRATE"
+        migration.xml = xml
+        migration.xml_source = xml_source
+        migration.status = "XML"
         migration.status_msg = ""
     except exceptions.InvalidXMLError as e:
         migration.status_msg = str(e)

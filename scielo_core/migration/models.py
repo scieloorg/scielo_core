@@ -13,7 +13,7 @@ LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
-MIGRATION_STATUS = ('GET_XML', 'TO_MIGRATE', 'MIGRATED')
+MIGRATION_STATUS = ('CREATED', 'XML', 'MIGRATED')
 
 
 def utcnow():
@@ -31,7 +31,8 @@ class Migration(Document):
 
     file_path = StringField()
 
-    xml_id = StringField()
+    xml = StringField()
+    xml_source = StringField()
 
     issn = StringField()
     year = StringField()
@@ -61,7 +62,6 @@ class Migration(Document):
             'v91',
             'v93',
             'status',
-            'xml_id',
         ]
     }
 

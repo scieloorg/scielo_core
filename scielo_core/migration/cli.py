@@ -9,7 +9,7 @@ from scielo_core.migration import tasks, controller
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-LOGGER.basicConfig(
+logging.basicConfig(
     filename=config.MIGRATION_LOGFILE, encoding='utf-8', level=logging.DEBUG)
 
 
@@ -31,25 +31,18 @@ def register_migration(docs_jsonl_file_path, issns_file_path, skip_update=False)
         fp.write("\n".join(issns))
 
 
-def pull_data_from_new_website(issns_file_path):
+def migrate(issns_file_path, xml_folder_path, collection):
     with open(issns_file_path) as fp:
         for issn in fp.readlines():
             issn = issn.strip()
-            tasks.pull_data_from_new_website(issn)
+            tasks.pull_data_and_request_id(issn, xml_folder_path, collection)
 
 
-def pull_data_from_old_website(issns_file_path, xml_folder_path, collection):
+def request_id(issns_file_path):
     with open(issns_file_path) as fp:
         for issn in fp.readlines():
             issn = issn.strip()
-            tasks.pull_data_from_old_website(issn, xml_folder_path, collection)
-
-
-def migrate_journals_xmls(issns_file_path):
-    with open(issns_file_path) as fp:
-        for issn in fp.readlines():
-            issn = issn.strip()
-            tasks.migrate_journal_xmls(issn)
+            tasks.request_id_for_journal_documents(issn)
 
 
 def cli(argv=None):
@@ -86,40 +79,31 @@ def cli(argv=None):
         "issns_file_path",
         help="file path to save an ISSN list",
     )
-    parser_pull_new = subparsers.add_parser(
-        "pull_new",
-        help="Pull data from new website",
-        description="Pull data from new website",
-    )
-    parser_pull_new.add_argument(
-        "issns_file_path",
-        help="file path to save an ISSN list",
-    )
 
-    parser_pull_data_from_old_website = subparsers.add_parser(
-        "pull_old",
-        help="Pull data from old website",
-        description="Pull data from old website",
+    parser_migrate = subparsers.add_parser(
+        "migrate",
+        help="Pull data",
+        description="Pull data",
     )
-    parser_pull_data_from_old_website.add_argument(
+    parser_migrate.add_argument(
         "issns_file_path",
-        help="file path to save an ISSN list",
+        help="file path of ISSN list to pull data",
     )
-    parser_pull_data_from_old_website.add_argument(
+    parser_migrate.add_argument(
         "xml_folder_path",
         help="XML folder path",
     )
-    parser_pull_data_from_old_website.add_argument(
+    parser_migrate.add_argument(
         "collection",
         help="collection acronym",
     )
 
-    parser_migrate_journals_xmls = subparsers.add_parser(
-        "migrate_xml",
-        help="Migrate data",
-        description="Migrate data",
+    parser_request_id = subparsers.add_parser(
+        "request_id",
+        help="Request ID",
+        description="Request ID",
     )
-    parser_migrate_journals_xmls.add_argument(
+    parser_request_id.add_argument(
         "issns_file_path",
         help="file path to save an ISSN list",
     )
@@ -142,13 +126,11 @@ def cli(argv=None):
     if args.command == "register_migration":
         register_migration(
             args.docs_jsonl_file_path, args.issns_file_path, args.skip_update)
-    elif args.command == "pull_new":
-        pull_data_from_new_website(args.issns_file_path)
-    elif args.command == "pull_old":
-        pull_data_from_old_website(
+    elif args.command == "migrate":
+        migrate(
             args.issns_file_path, args.xml_folder_path, args.collection)
-    elif args.command == "migrate_xml":
-        migrate_journals_xmls(args.issns_file_path)
+    elif args.command == "request_id":
+        request_id(args.issns_file_path)
     elif args.command == "get_xml":
         get_xml(args.v2)
     else:

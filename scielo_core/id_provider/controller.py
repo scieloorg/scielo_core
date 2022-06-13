@@ -30,40 +30,20 @@ def request_document_ids(pkg_file_path, user=None):
 
     arguments = xml_sps.IdRequestArguments(pkg_file_path)
 
-    request = _create_request(arguments.data, user)
+    request = _log_new_request(arguments.data, user)
 
     try:
         doc = _request_document_ids(**arguments.data)
         data = doc.as_dict()
-        _update_request(request, data)
+        _log_request_update(request, data)
     except exceptions.DocumentIsUpdatedError:
         data = arguments.data
-        _update_request(request, data)
+        _log_request_update(request, data)
     else:
-        return get_registered_xml(doc.xml_id)
+        return doc.xml
 
 
-def get_registered_xml(id):
-    try:
-        xml_content = models.XML(id=id)
-        return xml_content.xml
-    except Exception as e:
-        raise exceptions.NotFoundXMLError(e)
-
-
-def register_xml(xml, xml_source):
-    try:
-        xml_sps.is_valid_xml(xml)
-        xml_content = models.XML()
-        xml_content.xml = xml
-        xml_content.xml_source = xml_source
-        xml_content.save()
-        return xml_content.id
-    except Exception as e:
-        raise exceptions.UnableToCreateXMLError(e)
-
-
-def _update_request(request, data):
+def _log_request_update(request, data):
     try:
         request.out_v2 = data['v2']
         request.out_v3 = data['v3']
@@ -76,7 +56,7 @@ def _update_request(request, data):
         LOGGER.debug("Error: Update request done")
 
 
-def _create_request(data, user):
+def _log_new_request(data, user):
     try:
         request = models.Requests()
         request.user = user
@@ -108,7 +88,7 @@ def _request_document_ids(
     """
     Obtém registro consultando com os dados do documento
     Cria o registro
-    
+
     Returns
     -------
     dict
