@@ -46,9 +46,9 @@ def _save_migration(migration):
 
 
 def update_status(migration, status, status_msg):
-    migration.status = status
+    migration.status = status or migration.status
     migration.status_msg = status_msg
-    if status == "MIGRATED":
+    if migration.status == "MIGRATED":
         migration.xml = ""
     _save_migration(migration)
 

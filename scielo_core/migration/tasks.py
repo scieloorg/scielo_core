@@ -82,18 +82,38 @@ def _request_xml(uri, timeout=None):
 
 
 def _pull_xml(pid, xml_folder_path, collection):
-    data = None
-    try:
-        data = _get_data_from_new_website(pid)
-    except PullDataFromNewWebsiteError:
+    data = {}
+
+    migration = controller.get_migration(pid)
+
+    if xml_folder_path:
+        # get xml from a xml_folder_path
         try:
-            migration = controller.get_migration(pid)
             data = _get_data_from_old_website_file_system(
                 xml_folder_path, migration.file_path)
-        except PullXMLError:
+            return data
+        except PullXMLError as e:
+            data['xml'] = None
+            data['source'] = xml_folder_path
+
+    if collection:
+        # get xml from a collection
+        try:
             data = _get_data_from_am(pid, collection)
-    if not data['xml']:
-        raise PullXMLError("Unable to get XML")
+            return data
+        except PullXMLError as e:
+            data['xml'] = None
+            data['source'] = collection
+
+    if not xml_folder_path and not collection:
+        try:
+            # get xml from new website
+            data = _get_data_from_new_website(pid)
+            return data
+        except PullDataFromNewWebsiteError as e:
+            data['xml'] = None
+            data['source'] = 'new_website'
+
     return data
 
 
@@ -225,6 +245,9 @@ def _pull_data_and_request_id(pid, xml_folder_path, collection):
         controller.add_xml_and_v3(
             pid, data.get("v3"), data["xml"], data["source"])
 
+        if not data['xml']:
+            raise PullXMLError("Unable to get XML %s" % pid)
+
         _request_id_and_update_migration(pid, data["xml"])
 
     except (
@@ -232,6 +255,8 @@ def _pull_data_and_request_id(pid, xml_folder_path, collection):
             PullXMLError,
             ) as e:
         LOGGER.error("Unable to harvest data %s %s" % (pid, e))
+        migration = controller.get_migration(pid)
+        controller.update_status(migration, None, "Not found %s" % pid)
         return None
     except (
             controller.SaveMigrationError,

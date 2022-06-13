@@ -90,11 +90,13 @@ def cli(argv=None):
         help="file path of ISSN list to pull data",
     )
     parser_migrate.add_argument(
-        "xml_folder_path",
+        "--xml_folder_path",
+        default=None,
         help="XML folder path",
     )
     parser_migrate.add_argument(
-        "collection",
+        "--collection",
+        default=None,
         help="collection acronym",
     )
 
