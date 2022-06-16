@@ -17,6 +17,14 @@ LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
+def get_xml_by_v2(v2):
+    try:
+        doc = _fetch_most_recent_document(v2=v2)
+        return doc.xml
+    except exceptions.FetchMostRecentRecordError:
+        return
+
+
 def get_xml(v3):
     try:
         doc = _fetch_most_recent_document(v3=v3)
@@ -282,6 +290,25 @@ def need_to_update(input_data, registered_data):
     return False
 
 
+# def _try_to_get_registered_document_data(document_attribs):
+#     """
+#     Busca documento
+
+#     Arguments
+#     ---------
+#         document_attribs: dict
+#         with_v2: bool
+#             usa ou não o v2 na consulta
+#     """
+#     params = _get_query_parameters(document_attribs)
+
+#     try:
+#         records = _fetch_records(**params)
+#     except exceptions.FetchRecordsError as e:
+#         raise exceptions.TryToGetDocumentRecordError(e)
+#     else:
+
+
 def _get_registered_document_data(document_attribs):
     """
     Obtém registro consultando com dados do documento:
@@ -356,7 +383,7 @@ def _get_registered_document_ids(registered_data):
         return _data
 
 
-def _get_query_parameters(document_attribs, with_v2=False, aop_version=False):
+def _get_query_parameters(document_attribs, with_v2=False, aop_version=False, with_issue=False):
     """
     Obtém os parâmetros para buscar um documento
 
@@ -365,21 +392,25 @@ def _get_query_parameters(document_attribs, with_v2=False, aop_version=False):
         document: Document
         with_v2: bool
         aop_version: bool
+        with_issue: bool
+
     """
     params = {}
     for attr in ("pub_year", "collab", ):
         params[attr] = document_attribs[attr]
 
-    for attr in ("volume", "number", "suppl", "elocation_id",
-                 "fpage", "fpage_seq", "lpage", ):
-        if aop_version:
-            params[attr] = ''
-        else:
-            params[attr] = document_attribs[attr]
+    if with_issue or aop_version:
+        for attr in ("volume", "number", "suppl", "elocation_id",
+                     "fpage", "fpage_seq", "lpage", ):
+            if aop_version:
+                params[attr] = ''
+            else:
+                params[attr] = document_attribs[attr]
 
     if not aop_version and with_v2:
         params["v2"] = document_attribs["v2"]
 
+    params["surnames"] = ""
     if document_attribs["authors"]:
         params["surnames"] = " ".join([
             author["surname"] for author in document_attribs["authors"]
@@ -391,8 +422,6 @@ def _get_query_parameters(document_attribs, with_v2=False, aop_version=False):
         # nenhum destes, então procurar pelo início do body
         params["partial_body"] = document_attribs["partial_body"]
 
-    if aop_version:
-        params.pop("pub_year")
     qs = None
     attributes = [
         ("issns", "value"),

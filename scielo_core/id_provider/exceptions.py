@@ -15,6 +15,10 @@ class FetchMostRecentRecordError(Exception):
     ...
 
 
+class TryToGetDocumentRecordError(Exception):
+    ...
+
+
 class SavingError(Exception):
     ...
 

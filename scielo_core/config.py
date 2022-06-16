@@ -26,6 +26,8 @@ HARVEST_XMLS_QUEUE = (
     os.environ.get("HARVEST_XMLS_QUEUE") or 'migr_high_priority')
 MIGRATE_XMLS_QUEUE = (
     os.environ.get("MIGRATE_XMLS_QUEUE") or 'migr_high_priority')
+UNDO_ID_REQUEST_QUEUE = (
+    os.environ.get("UNDO_ID_REQUEST_QUEUE") or 'migr_high_priority')
 
 MIGRATION_LOGFILE = os.environ.get('MIGRATION_LOGFILE') or 'migration.log'
 ID_PROVIDER_LOGFILE = os.environ.get('ID_PROVIDER_LOGFILE') or 'id_provider.log'

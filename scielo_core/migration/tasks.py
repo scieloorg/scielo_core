@@ -12,6 +12,7 @@ from scielo_core.config import (
     REGISTER_MIGRATION_QUEUE,
     HARVEST_XMLS_QUEUE,
     MIGRATE_XMLS_QUEUE,
+    UNDO_ID_REQUEST_QUEUE,
     get_article_meta_uri,
 )
 from scielo_core.basic import xml_sps_zip_file
@@ -19,6 +20,7 @@ from scielo_core.id_provider import (
     xml_sps,
     exceptions,
 )
+from scielo_core.id_provider.controller import get_xml_by_v2
 from scielo_core.migration import controller
 from scielo_core.id_provider.view import request_document_id, HTTPStatus
 
@@ -309,6 +311,49 @@ def _request_id_and_update_migration(pid, xml=None):
         status = "XML"
 
     controller.update_status(migration, status, status_msg)
+
+
+#############################################################
+
+
+def undo_id_request_for_journal_documents(issn):
+    res = task_undo_id_request_for_journal_documents.apply_async(
+        queue=UNDO_ID_REQUEST_QUEUE,
+        args=(issn, ),
+    )
+    return _handle_result(
+        "task undo_id_request_for_journal_documents", res, get_result=False)
+
+
+@app.task(name='task_undo_id_request_for_journal_documents')
+def task_undo_id_request_for_journal_documents(issn):
+    for pid in controller.get_pids(issn, "MIGRATED"):
+        res = _undo_id_request_and_update_migration(pid)
+
+
+def _undo_id_request_and_update_migration(pid):
+    try:
+
+        LOGGER.debug("Undo id request %s" % pid)
+        xml = get_xml_by_v2(pid)
+
+    except Exception as e:
+        LOGGER.exception(
+            "Unable to undo id request, XML %s not found. %s" % (pid, e))
+        return
+    if xml:
+        try:
+            LOGGER.debug("Get migration %s" % pid)
+            migration = controller.get_migration(pid)
+
+        except controller.FetchMigrationError as e:
+            LOGGER.exception("Migration %s not found" % pid)
+            return
+
+        migration.xml = xml
+        migration.status = "XML"
+        migration.status_msg = "id request undone"
+        controller.update_status(migration, "XML", "id request undone")
 
 
 #############################################################

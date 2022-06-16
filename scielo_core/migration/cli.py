@@ -45,6 +45,13 @@ def request_id(issns_file_path):
             tasks.request_id_for_journal_documents(issn)
 
 
+def undo_id_request(issns_file_path):
+    with open(issns_file_path) as fp:
+        for issn in fp.readlines():
+            issn = issn.strip()
+            tasks.undo_id_request_for_journal_documents(issn)
+
+
 def cli(argv=None):
     if argv is None:
         argv = sys.argv
@@ -110,6 +117,16 @@ def cli(argv=None):
         help="file path to save an ISSN list",
     )
 
+    parser_undo_id_request = subparsers.add_parser(
+        "undo_id_request",
+        help="Undo ID request",
+        description="Undo ID request",
+    )
+    parser_undo_id_request.add_argument(
+        "issns_file_path",
+        help="file path to save an ISSN list",
+    )
+
     parser_get_xml = subparsers.add_parser(
         "get_xml",
         help="Get XML",
@@ -133,6 +150,8 @@ def cli(argv=None):
             args.issns_file_path, args.xml_folder_path, args.collection)
     elif args.command == "request_id":
         request_id(args.issns_file_path)
+    elif args.command == "undo_id_request":
+        undo_id_request(args.issns_file_path)
     elif args.command == "get_xml":
         get_xml(args.v2)
     else:
