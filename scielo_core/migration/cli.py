@@ -10,7 +10,7 @@ from scielo_core.migration import tasks, controller
 LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 logging.basicConfig(
-    filename=config.MIGRATION_LOGFILE, encoding='utf-8', level=logging.DEBUG)
+    filename=config.SCIELO_CORE_MIGRATION_LOGFILE, level=logging.DEBUG)
 
 
 def get_xml(v2):

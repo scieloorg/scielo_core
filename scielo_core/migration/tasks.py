@@ -6,16 +6,17 @@ from tempfile import mkdtemp
 from celery import Celery
 
 from scielo_core.config import (
-    CELERY_RESULT_BACKEND_URL,
-    CELERY_BROKER_URL,
-    EXAMPLE_QUEUE,
-    REGISTER_MIGRATION_QUEUE,
-    HARVEST_XMLS_QUEUE,
-    MIGRATE_XMLS_QUEUE,
-    UNDO_ID_REQUEST_QUEUE,
+    SCIELO_CORE_MIGRATION_CELERY_RESULT_BACKEND_URL,
+    SCIELO_CORE_MIGRATION_CELERY_BROKER_URL,
+    SCIELO_CORE_REGISTER_MIGRATION_QUEUE,
+    SCIELO_CORE_HARVEST_XMLS_QUEUE,
+    SCIELO_CORE_MIGRATE_XMLS_QUEUE,
+    SCIELO_CORE_UNDO_ID_REQUEST_QUEUE,
     get_article_meta_uri,
 )
 from scielo_core.basic import xml_sps_zip_file
+from scielo_core.basic.exceptions import InvalidXMLError
+
 from scielo_core.id_provider import (
     xml_sps,
     exceptions,
@@ -25,11 +26,11 @@ from scielo_core.migration import controller
 from scielo_core.id_provider.view import request_document_id, HTTPStatus
 
 
-app = Celery('tasks', backend=CELERY_RESULT_BACKEND_URL, broker=CELERY_BROKER_URL)
+app = Celery('tasks',
+             backend=SCIELO_CORE_MIGRATION_CELERY_RESULT_BACKEND_URL,
+             broker=SCIELO_CORE_MIGRATION_CELERY_BROKER_URL)
 
 LOGGER = logging.getLogger(__name__)
-
-DEFAULT_QUEUE = 'high_priority'
 
 
 class UnableToCreateXMLZipFileError(Exception):
@@ -50,7 +51,7 @@ def _handle_result(task_name, result, get_result):
 
 
 ###########################################
-
+EXAMPLE_QUEUE='migr_default'
 def example(data, get_result=None):
     res = task_example.apply_async(
         queue=EXAMPLE_QUEUE,
@@ -193,7 +194,7 @@ def push_xml_zip_file(xml_zip_file_path):
 #############################################
 def register_migration(data, skip_update, get_result=None):
     res = task_register_migration.apply_async(
-        queue=REGISTER_MIGRATION_QUEUE,
+        queue=SCIELO_CORE_REGISTER_MIGRATION_QUEUE,
         args=(data, skip_update, ),
     )
     return _handle_result("task register_migration", res, get_result)
@@ -225,7 +226,7 @@ def task_register_migration(data, skip_update):
 
 def pull_data_and_request_id(issn, xml_folder_path, collection):
     res = task_pull_data_and_request_id.apply_async(
-        queue=HARVEST_XMLS_QUEUE,
+        queue=SCIELO_CORE_HARVEST_XMLS_QUEUE,
         args=(issn, xml_folder_path, collection),
     )
     return _handle_result("task pull_data_and_request_id", res, get_result=False)
@@ -271,7 +272,7 @@ def _pull_data_and_request_id(pid, xml_folder_path, collection):
 
 def request_id_for_journal_documents(issn):
     res = task_request_id_for_journal_documents.apply_async(
-        queue=MIGRATE_XMLS_QUEUE,
+        queue=SCIELO_CORE_MIGRATE_XMLS_QUEUE,
         args=(issn, ),
     )
     return _handle_result(
@@ -299,7 +300,7 @@ def _request_id_and_update_migration(pid, xml=None):
     try:
         xml = xml or migration.xml
         if not xml:
-            raise exceptions.InvalidXMLError("Article %s has no XML" % pid)
+            raise InvalidXMLError("Article %s has no XML" % pid)
 
         LOGGER.debug("request_document_id %s" % xml[:10])
 
@@ -313,7 +314,7 @@ def _request_id_and_update_migration(pid, xml=None):
         status_msg = str(e)
         status = "XML"
 
-    except exceptions.InvalidXMLError as e:
+    except InvalidXMLError as e:
         LOGGER.debug("_request_id_and_update_migration %s" % e)
         return
 
@@ -325,7 +326,7 @@ def _request_id_and_update_migration(pid, xml=None):
 
 def undo_id_request_for_journal_documents(issn):
     res = task_undo_id_request_for_journal_documents.apply_async(
-        queue=UNDO_ID_REQUEST_QUEUE,
+        queue=SCIELO_CORE_UNDO_ID_REQUEST_QUEUE,
         args=(issn, ),
     )
     return _handle_result(

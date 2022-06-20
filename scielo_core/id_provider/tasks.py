@@ -1,18 +1,19 @@
-import os
 import logging
 
 from celery import Celery
 
 from scielo_core.id_provider import view
 from scielo_core.config import (
-    CELERY_RESULT_BACKEND_URL,
-    CELERY_BROKER_URL,
+    SCIELO_CORE_ID_PROVIDER_CELERY_RESULT_BACKEND_URL,
+    SCIELO_CORE_ID_PROVIDER_CELERY_BROKER_URL,
 )
 
 EXAMPLE_QUEUE = 'low_priority'
 
 
-app = Celery('tasks', backend=CELERY_RESULT_BACKEND_URL, broker=CELERY_BROKER_URL)
+app = Celery('tasks',
+             backend=SCIELO_CORE_ID_PROVIDER_CELERY_RESULT_BACKEND_URL,
+             broker=SCIELO_CORE_ID_PROVIDER_CELERY_BROKER_URL)
 
 LOGGER = logging.getLogger(__name__)
 

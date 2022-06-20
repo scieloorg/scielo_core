@@ -7,11 +7,11 @@ from scielo_core.basic import exceptions
 from scielo_core.migration import models
 from scielo_core.id_provider import xml_sps
 
-from scielo_core.config import ID_PROVIDER_DB_URI
-from scielo_core.config import WEBSITE_DB_URI
+from scielo_core.config import SCIELO_CORE_ID_PROVIDER_DB_URI
+from scielo_core.config import SCIELO_CORE_WEBSITE_DB_URI
 
-mongo_db.mk_connection(WEBSITE_DB_URI)
-mongo_db.mk_connection(ID_PROVIDER_DB_URI, 'scielo_core')
+mongo_db.mk_connection(SCIELO_CORE_WEBSITE_DB_URI)
+mongo_db.mk_connection(SCIELO_CORE_ID_PROVIDER_DB_URI, 'scielo_core')
 
 
 LOGGER = logging.getLogger(__name__)

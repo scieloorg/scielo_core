@@ -12,7 +12,7 @@ from scielo_core.id_provider import (
 LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 logging.basicConfig(
-    filename=config.ID_PROVIDER_LOGFILE, encoding='utf-8', level=logging.DEBUG)
+    filename=config.SCIELO_CORE_ID_PROVIDER_LOGFILE, level=logging.DEBUG)
 
 
 def request_document_id(pkg_file_path, username):
