@@ -298,6 +298,9 @@ def _request_id_and_update_migration(pid, xml=None):
 
     try:
         xml = xml or migration.xml
+        if not xml:
+            raise exceptions.InvalidXMLError("Article %s has no XML" % pid)
+
         LOGGER.debug("request_document_id %s" % xml[:10])
 
         xml_zip_file_path = _create_tmp_xml_zip_file(f"{pid}.zip", xml)
@@ -309,6 +312,10 @@ def _request_id_and_update_migration(pid, xml=None):
     except exceptions.RequestDocumentIdError as e:
         status_msg = str(e)
         status = "XML"
+
+    except exceptions.InvalidXMLError as e:
+        LOGGER.debug("_request_id_and_update_migration %s" % e)
+        return
 
     controller.update_status(migration, status, status_msg)
 

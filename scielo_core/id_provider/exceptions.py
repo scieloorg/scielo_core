@@ -19,6 +19,10 @@ class TryToGetDocumentRecordError(Exception):
     ...
 
 
+class NotEnoughParametersToGetDocumentRecordError(Exception):
+    ...
+
+
 class SavingError(Exception):
     ...
 

@@ -124,7 +124,12 @@ def _request_document_ids(
         LOGGER.debug("DocumentDoesNotExistError")
         registered_data = {}
     except exceptions.GetRegisteredDocumentError as e:
-        raise exceptions.RequestDocumentIdError(e)
+        LOGGER.exception(
+            "Request document ID will create a new record "
+            "because it was not possible to recover any"
+        )
+        # raise exceptions.RequestDocumentIdError(e)
+        registered_data = {}
 
     data = _get_data_to_register(input_data, registered_data)
     if not data:
@@ -290,25 +295,6 @@ def need_to_update(input_data, registered_data):
     return False
 
 
-# def _try_to_get_registered_document_data(document_attribs):
-#     """
-#     Busca documento
-
-#     Arguments
-#     ---------
-#         document_attribs: dict
-#         with_v2: bool
-#             usa ou não o v2 na consulta
-#     """
-#     params = _get_query_parameters(document_attribs)
-
-#     try:
-#         records = _fetch_records(**params)
-#     except exceptions.FetchRecordsError as e:
-#         raise exceptions.TryToGetDocumentRecordError(e)
-#     else:
-
-
 def _get_registered_document_data(document_attribs):
     """
     Obtém registro consultando com dados do documento:
@@ -343,6 +329,7 @@ def _get_registered_document_data(document_attribs):
             exceptions.QueryingDocumentInIssueError,
             exceptions.QueryingDocumentAsAOPError,
             exceptions.FetchMostRecentRecordError,
+            exceptions.NotEnoughParametersToGetDocumentRecordError,
             ) as e:
         raise exceptions.GetRegisteredDocumentError(e)
 
@@ -383,7 +370,7 @@ def _get_registered_document_ids(registered_data):
         return _data
 
 
-def _get_query_parameters(document_attribs, with_v2=False, aop_version=False, with_issue=False):
+def _get_query_parameters(document_attribs, with_v2=False, aop_version=False):
     """
     Obtém os parâmetros para buscar um documento
 
@@ -396,16 +383,26 @@ def _get_query_parameters(document_attribs, with_v2=False, aop_version=False, wi
 
     """
     params = {}
+
+    for k in ("doi_with_lang", "authors", "collab", "article_titles"):
+        if document_attribs[k]:
+            break
+        # nenhum destes, então procurar pelo início do body
+        if not document_attribs["partial_body"]:
+            raise exceptions.NotEnoughParametersToGetDocumentRecordError(
+                str(document_attribs)
+            )
+        params["partial_body"] = document_attribs["partial_body"]
+
     for attr in ("pub_year", "collab", ):
         params[attr] = document_attribs[attr]
 
-    if with_issue or aop_version:
-        for attr in ("volume", "number", "suppl", "elocation_id",
-                     "fpage", "fpage_seq", "lpage", ):
-            if aop_version:
-                params[attr] = ''
-            else:
-                params[attr] = document_attribs[attr]
+    for attr in ("volume", "number", "suppl", "elocation_id",
+                 "fpage", "fpage_seq", "lpage", ):
+        if aop_version:
+            params[attr] = ''
+        else:
+            params[attr] = document_attribs[attr]
 
     if not aop_version and with_v2:
         params["v2"] = document_attribs["v2"]
@@ -415,12 +412,6 @@ def _get_query_parameters(document_attribs, with_v2=False, aop_version=False, wi
         params["surnames"] = " ".join([
             author["surname"] for author in document_attribs["authors"]
         ])
-
-    for k in ("doi_with_lang", "authors", "collab", "article_titles"):
-        if document_attribs[k]:
-            break
-        # nenhum destes, então procurar pelo início do body
-        params["partial_body"] = document_attribs["partial_body"]
 
     qs = None
     attributes = [
@@ -441,6 +432,7 @@ def _get_query_parameters(document_attribs, with_v2=False, aop_version=False, wi
             params.update(_params)
     if qs:
         params["qs"] = qs
+    LOGGER.debug("Parameters %s" % str(params))
     return params
 
 
@@ -454,8 +446,8 @@ def _get_document_published_in_an_issue(document_attribs, with_v2=False):
         with_v2: bool
             usa ou não o v2 na consulta
     """
-    params = _get_query_parameters(document_attribs, with_v2=with_v2)
     try:
+        params = _get_query_parameters(document_attribs, with_v2=with_v2)
         return _fetch_most_recent_document(**params)
     except exceptions.FetchMostRecentRecordError as e:
         raise exceptions.QueryingDocumentInIssueError(
@@ -477,8 +469,8 @@ def _get_document_published_as_aop(document_attribs):
     ---------
         document_attribs: dict
     """
-    params = _get_query_parameters(document_attribs, aop_version=True)
     try:
+        params = _get_query_parameters(document_attribs, aop_version=True)
         return _fetch_most_recent_document(**params)
     except exceptions.FetchMostRecentRecordError as e:
         raise exceptions.QueryingDocumentAsAOPError(
