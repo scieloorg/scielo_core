@@ -2,7 +2,7 @@ import sys
 import argparse
 import logging
 
-from scielo_core.id_provider import tasks, view
+from scielo_core.id_provider import tasks, controller
 from scielo_core.config import run_concurrently
 
 
@@ -10,16 +10,16 @@ LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
-def _request_id(pkg_file_path):
+def _request_id(pkg_file_path, username):
     if run_concurrently():
-        return tasks.request_id(pkg_file_path, get_result=False)
-    return view.request_document_id(pkg_file_path)
+        return tasks.request_id(pkg_file_path, username, get_result=False)
+    return controller.request_document_ids(pkg_file_path, username)
 
 
 def _request_id_for_a_xml_list(source_file_path, output_file_path):
     with open(source_file_path) as fp:
         for row in fp.readlines():
-            resp = _request_id(row.strip())
+            resp = _request_id(row.strip(), "commandline")
             with open(output_file_path, "a") as out:
                 out.write(row)
 

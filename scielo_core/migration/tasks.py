@@ -21,9 +21,8 @@ from scielo_core.id_provider import (
     xml_sps,
     exceptions,
 )
-from scielo_core.id_provider.controller import get_xml_by_v2
+from scielo_core.id_provider.controller import get_xml_by_v2, request_document_ids
 from scielo_core.migration import controller
-from scielo_core.id_provider.view import request_document_id, HTTPStatus
 
 
 app = Celery('tasks',
@@ -177,18 +176,26 @@ def push_xml_zip_file(xml_zip_file_path):
     try:
         LOGGER.debug("zip %s" % xml_zip_file_path)
 
-        resp = request_document_id(xml_zip_file_path, "migration")
+        resp = request_document_ids(xml_zip_file_path, "migration")
+
+        ## resp = request_document_id(xml_zip_file_path, "migration")
 
         _delete_temp_xml_zip_file_path(xml_zip_file_path)
 
-        LOGGER.debug("resp=%s" % resp)
-        if resp == HTTPStatus.INTERNAL_SERVER_ERROR:
-            raise exceptions.RequestDocumentIdError
+    except exceptions.RequestDocumentIdError as e:
+        LOGGER.debug(e)
+        _delete_temp_xml_zip_file_path(xml_zip_file_path)
+        raise exceptions.RequestDocumentIdError(e)
+
+    except exceptions.DocumentIsUpdatedError as e:
+        LOGGER.debug(e)
+        _delete_temp_xml_zip_file_path(xml_zip_file_path)
+        raise exceptions.RequestDocumentIdError(e)
 
     except Exception as e:
         LOGGER.debug("Error `push_xml_zip_file` %s" % e)
         _delete_temp_xml_zip_file_path(xml_zip_file_path)
-        raise exceptions.RequestDocumentIdError
+        raise exceptions.RequestDocumentIdError(e)
 
 
 #############################################
