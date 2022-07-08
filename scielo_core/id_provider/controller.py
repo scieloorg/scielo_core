@@ -33,6 +33,24 @@ def get_xml(v3):
         return
 
 
+# def request_document_ids(pkg_file_path, user=None):
+#     LOGGER.debug(pkg_file_path)
+
+#     arguments = xml_sps.IdRequestArguments(pkg_file_path)
+
+#     request = _log_new_request(arguments.data, user)
+
+#     try:
+#         doc = _request_document_ids(**arguments.data)
+#         data = doc.as_dict()
+#         _log_request_update(request, data)
+#     except exceptions.DocumentIsAlreadyUpdatedError:
+#         data = arguments.data
+#         _log_request_update(request, data)
+#     else:
+#         return doc.xml
+
+
 def request_document_ids(pkg_file_path, user=None):
     LOGGER.debug(pkg_file_path)
 
@@ -41,14 +59,70 @@ def request_document_ids(pkg_file_path, user=None):
     request = _log_new_request(arguments.data, user)
 
     try:
+        input_data = get_document_input_data(**arguments.data)
+
+        registered_data = get_document_registered_data(input_data)
+
+
         doc = _request_document_ids(**arguments.data)
         data = doc.as_dict()
         _log_request_update(request, data)
-    except exceptions.DocumentIsUpdatedError:
+    except exceptions.DocumentIsAlreadyUpdatedError:
         data = arguments.data
         _log_request_update(request, data)
     else:
         return doc.xml
+
+
+def get_document_input_data(
+        v2, v3, aop_pid,
+        doi_with_lang,
+        issns,
+        pub_year,
+        volume, number, suppl,
+        elocation_id, fpage, fpage_seq, lpage,
+        authors, collab,
+        article_titles,
+        partial_body,
+        zip_file_path,
+        extra=None,
+        ):
+    """
+    Obtém os dados do documento de entrada
+    """
+    document = Document(
+        v2, v3, aop_pid,
+        doi_with_lang,
+        issns,
+        pub_year,
+        volume, number, suppl,
+        elocation_id, fpage, fpage_seq, lpage,
+        authors, collab,
+        article_titles,
+        partial_body,
+        zip_file_path,
+        extra,
+    )
+    return document.attribs
+
+
+def get_document_registered_data(input_data):
+    """
+    Obtém os dados do documento registrado
+    """
+    try:
+        registered_data = _get_registered_document_data(input_data)
+    except exceptions.DocumentDoesNotExistError:
+        LOGGER.debug("DocumentDoesNotExistError")
+        registered_data = {}
+    except exceptions.GetRegisteredDocumentError as e:
+        LOGGER.exception(
+            "Request document ID will create a new record "
+            "because it was not possible to recover any"
+        )
+        # raise exceptions.RequestDocumentIdError(e)
+        registered_data = {}
+    return registered_data
 
 
 def _log_request_update(request, data):
@@ -134,7 +208,7 @@ def _request_document_ids(
     data = _get_data_to_register(input_data, registered_data)
     if not data:
         LOGGER.debug("Document is already registered")
-        raise exceptions.DocumentIsUpdatedError(
+        raise exceptions.DocumentIsAlreadyUpdatedError(
             "Document is already registered"
         )
 
@@ -146,33 +220,38 @@ def _request_document_ids(
 
 
 def _get_data_to_register(input_data, registered_data):
+    """
+    Check `registered_data` and `input_data` and returns data to update
+
     # novo, atualizado, pendente de atualização
     # novo: registrar
     # atualizado: finalizar
     # pendente de atualização: registrar
+
+    """
+    LOGGER.debug("Input data: %s" % input_data)
     if not registered_data:
-        # novo
+        # new document, get xml
+        LOGGER.debug("New document %s" %
+                     input_data['zip_file_path'])
         input_data['xml'] = xml_sps.get_xml_from_zip_file(
             input_data['zip_file_path'])
-        return input_data
 
     LOGGER.debug("Registered data: %s" % registered_data)
-    if not need_to_update(input_data, registered_data):
-        # documento já está registrado
-        LOGGER.debug("Document is already updated %s" % input_data)
-        return None
+    if _find_pids_divergences(input_data, registered_data):
 
-    # add pids
-    data = _update_pids(input_data, registered_data)
+        LOGGER.debug("Conflicting IDs. Update IDs")
 
-    LOGGER.debug("Update xml: %s" % data)
-    data["xml"] = xml_sps.update_ids(
-        data["zip_file_path"],
-        data["v3"],
-        data["v2"],
-        data["aop_pid"],
-    )
-    return data
+        # add pids
+        data = _update_pids(input_data, registered_data)
+
+        data["xml"] = xml_sps.update_ids(
+            data["zip_file_path"],
+            data["v3"],
+            data["v2"],
+            data["aop_pid"],
+        )
+        return data, True
 
 
 def _update_pids(input_data, registered_data):
@@ -288,7 +367,7 @@ class Document:
 ##############################################
 
 
-def need_to_update(input_data, registered_data):
+def _find_pids_divergences(input_data, registered_data):
     for k in ("aop_pid", "v2", "v3"):
         if (input_data.get(k) or '') != (registered_data.get(k) or ''):
             return True
@@ -502,6 +581,26 @@ def _add_aop_pid(input_data, registered_data):
 ##############################################
 
 
+def _add_pid_v2(input_data, registered_data):
+    """
+    Garante que input_data tenha um v2 inédito
+
+    Arguments
+    ---------
+        input_data: dict
+
+    Returns
+    -------
+        dict
+    """
+    if not input_data["v2"]
+        if registered_data:
+            input_data["v2"] = registered_data["v2"]
+        else:
+            input_data["v2"] = _get_unique_v2()
+    return input_data
+
+
 def _add_pid_v3(input_data, registered_data):
     """
     Garante que input_data tenha um v3 inédito
@@ -631,5 +730,12 @@ def _fetch_most_recent_document(**kwargs):
 def _is_registered_v3(v3):
     try:
         return bool(_fetch_most_recent_document(**{"v3": v3}))
+    except exceptions.FetchMostRecentRecordError:
+        return False
+
+
+def _is_registered_v2(v2):
+    try:
+        return bool(_fetch_most_recent_document(**{"v2": v2}))
     except exceptions.FetchMostRecentRecordError:
         return False

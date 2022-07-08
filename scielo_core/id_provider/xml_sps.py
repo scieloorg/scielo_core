@@ -29,7 +29,7 @@ def get_xml_from_zip_file(zip_file_path):
 
 
 def update_ids(zip_file_path, v3, v2, aop_pid):
-    xmltree = etree.fromstring(xml_sps_zip_file.get_xml_content(zip_file_path))
+    xmltree = etree.fromstring(get_xml_from_zip_file(zip_file_path))
 
     # update IDs
     article_ids = ArticleIds(xmltree)
@@ -45,9 +45,7 @@ def update_ids(zip_file_path, v3, v2, aop_pid):
 class IdRequestArguments:
 
     def __init__(self, zip_file_path):
-        self.xmltree = etree.fromstring(
-            xml_sps_zip_file.get_xml_content(zip_file_path)
-        )
+        self.xmltree = etree.fromstring(get_xml_from_zip_file(zip_file_path))
         self.zip_file_path = zip_file_path
 
     @property

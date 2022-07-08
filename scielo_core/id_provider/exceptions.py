@@ -39,7 +39,7 @@ class DocumentDoesNotExistError(Exception):
     ...
 
 
-class DocumentIsUpdatedError(Exception):
+class DocumentIsAlreadyUpdatedError(Exception):
     ...
 
 
