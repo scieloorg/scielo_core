@@ -378,7 +378,7 @@ def _create_tmp_xml_zip_file(filename, xml_content):
         LOGGER.debug("Creating tmp xml zip file: %s %s" %
                      (filename, xml_content[:100]))
         LOGGER.debug("Validate XML")
-        xml_sps.is_valid_xml(xml_content)
+        xml_sps.get_xml_tree(xml_content)
 
         LOGGER.debug("Creating file")
         tempdir = mkdtemp()

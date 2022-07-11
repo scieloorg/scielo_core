@@ -17,19 +17,18 @@ LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
-def is_valid_xml(xml_content):
+get_xml_content = xml_sps_zip_file.get_xml_content
+
+
+def get_xml_tree(xml_content):
     try:
         return etree.fromstring(xml_content)
     except etree.XMLSyntaxError as e:
         raise exceptions.InvalidXMLError(e)
 
 
-def get_xml_from_zip_file(zip_file_path):
-    return xml_sps_zip_file.get_xml_content(zip_file_path)
-
-
-def update_ids(zip_file_path, v3, v2, aop_pid):
-    xmltree = etree.fromstring(get_xml_from_zip_file(zip_file_path))
+def update_ids(xml_content, v3, v2, aop_pid):
+    xmltree = get_xml_tree(xml_content)
 
     # update IDs
     article_ids = ArticleIds(xmltree)
@@ -45,7 +44,7 @@ def update_ids(zip_file_path, v3, v2, aop_pid):
 class IdRequestArguments:
 
     def __init__(self, zip_file_path):
-        self.xmltree = etree.fromstring(get_xml_from_zip_file(zip_file_path))
+        self.xmltree = get_xml_tree(xml_sps_zip_file.get_xml_content(zip_file_path))
         self.zip_file_path = zip_file_path
 
     @property

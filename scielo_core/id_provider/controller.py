@@ -1,7 +1,9 @@
 import logging
+from datetime import datetime
 from http import HTTPStatus
 
-from scielo_core.basic import mongo_db
+from scielo_core.basic import mongo_db, xml_sps_zip_file
+from scielo_core.basic.exceptions import InvalidXMLError
 from scielo_core.id_provider import (
     models,
     exceptions,
@@ -33,48 +35,146 @@ def get_xml(v3):
         return
 
 
-# def request_document_ids(pkg_file_path, user=None):
-#     LOGGER.debug(pkg_file_path)
-
-#     arguments = xml_sps.IdRequestArguments(pkg_file_path)
-
-#     request = _log_new_request(arguments.data, user)
-
-#     try:
-#         doc = _request_document_ids(**arguments.data)
-#         data = doc.as_dict()
-#         _log_request_update(request, data)
-#     except exceptions.DocumentIsAlreadyUpdatedError:
-#         data = arguments.data
-#         _log_request_update(request, data)
-#     else:
-#         return doc.xml
-
-
-def request_document_ids(pkg_file_path, user=None):
+def request_document_ids_from_file(pkg_file_path, user=None):
     LOGGER.debug(pkg_file_path)
 
-    arguments = xml_sps.IdRequestArguments(pkg_file_path)
-
-    request = _log_new_request(arguments.data, user)
+    try:
+        arguments = xml_sps.IdRequestArguments(pkg_file_path)
+    except InvalidXMLError as e:
+        raise exceptions.InvalidXMLError(
+            "Invalid XML in %s: %s" % (pkg_file_path, e)
+        )
 
     try:
-        input_data = get_document_input_data(**arguments.data)
+        params = arguments.data
+        params['user'] = user
+        changed_input_xml = request_document_ids(**params)
+        if changed_input_xml:
+            xml_sps_zip_file.update_zip_file_xml(
+                pkg_file_path, changed_input_xml)
+        return changed_input_xml
+    except (
+            exceptions.InputDataError,
+            exceptions.QueryingDocumentInIssueError,
+            exceptions.QueryingDocumentAsAOPError,
+            exceptions.FetchMostRecentRecordError,
+            exceptions.NotEnoughParametersToGetDocumentRecordError,
+            exceptions.GetRegisteredDocumentError,
+            ) as e:
+        raise exceptions.InputDataError(e)
 
-        registered_data = get_document_registered_data(input_data)
+    except (
+            exceptions.InvalidXMLError,
+            exceptions.PrepareDataToSaveError,
+            exceptions.SavingError,
+            ) as e:
+        raise exceptions.SavingError(e)
 
 
-        doc = _request_document_ids(**arguments.data)
-        data = doc.as_dict()
-        _log_request_update(request, data)
-    except exceptions.DocumentIsAlreadyUpdatedError:
-        data = arguments.data
-        _log_request_update(request, data)
-    else:
-        return doc.xml
+def request_document_ids(
+        v2, v3, aop_pid,
+        doi_with_lang,
+        issns,
+        pub_year,
+        volume, number, suppl,
+        elocation_id, fpage, fpage_seq, lpage,
+        authors, collab,
+        article_titles,
+        partial_body,
+        zip_file_path,
+        extra=None,
+        user=None):
+    """
+    Request Document PIDs
+
+    Parameters
+    ----------
+    v2: str
+    v3: str
+    aop_pid: str
+    doi_with_lang: {"lang": str, "value": str} list
+    issns: {"type": str, "value": str} list
+    pub_year: str
+    volume: str
+    number: str
+    suppl: str
+    elocation_id: str
+    fpage: str
+    fpage_seq: str
+    lpage: str
+    authors: {"surname": str, "given_names": str, "suffix": str, "prefix": str, "orcid": str} list
+    collab: str
+    article_titles: {"lang": str, "text": str} list
+    partial_body: str
+    zip_file_path: str
+    extra: dict
+
+    Returns
+    -------
+    None or str
+    None, if there was no XML changes
+    str, XML changed
+
+    Raises
+    ------
+    exceptions.InputDataError
+    exceptions.QueryingDocumentInIssueError
+    exceptions.QueryingDocumentAsAOPError
+    exceptions.FetchMostRecentRecordError
+    exceptions.NotEnoughParametersToGetDocumentRecordError
+    exceptions.DocumentDoesNotExistError
+    exceptions.GetRegisteredDocumentError
+    exceptions.InvalidXMLError
+    exceptions.PrepareDataToSaveError
+    exceptions.SavingError
+    """
+
+    # obtém os dados de entrada
+    input_data = _get_document_input_data(
+        v2, v3, aop_pid,
+        doi_with_lang,
+        issns,
+        pub_year,
+        volume, number, suppl,
+        elocation_id, fpage, fpage_seq, lpage,
+        authors, collab,
+        article_titles,
+        partial_body,
+        zip_file_path,
+        extra,
+    )
+
+    # registra a requisição de pids
+    request = _log_new_request(input_data, user)
+
+    # obtém o registro do documento
+    try:
+        registered = _get_registered_document(input_data)
+    except exceptions.DocumentDoesNotExistError:
+        registered = None
+
+    # obtém os dados do documento registrado
+    registered_data = (registered and registered.as_dict()) or {}
+
+    changed_input_xml = None
+    if _pids_updated(input_data, registered_data):
+        # verifica se o XML de entrada foi modificado com os
+        # pids recuperados / gerados
+        changed_input_xml = input_data['xml']
+
+    # prepara os dados para gravar
+    pkg = _prepare_data_to_register(input_data, registered)
+
+    # grava
+    _register_document(pkg)
+
+    # registra a atualização da requisição
+    _log_request_update(request, input_data)
+
+    return changed_input_xml
 
 
-def get_document_input_data(
+def _get_document_input_data(
         v2, v3, aop_pid,
         doi_with_lang,
         issns,
@@ -88,7 +188,38 @@ def get_document_input_data(
         extra=None,
         ):
     """
-    Obtém os dados do documento de entrada
+    Retorna os dados do documento de entrada em formato de dicionario
+
+    Parameters
+    ----------
+    v2: str
+    v3: str
+    aop_pid: str
+    doi_with_lang: {"lang": str, "value": str} list
+    issns: {"type": str, "value": str} list
+    pub_year: str
+    volume: str
+    number: str
+    suppl: str
+    elocation_id: str
+    fpage: str
+    fpage_seq: str
+    lpage: str
+    authors: {"surname": str, "given_names": str, "suffix": str, "prefix": str, "orcid": str} list
+    collab: str
+    article_titles: {"lang": str, "text": str} list
+    partial_body: str
+    zip_file_path: str
+    extra: dict
+
+    Returns
+    -------
+    dict
+
+    Raises
+    ------
+    exceptions.InputDataError
+
     """
     document = Document(
         v2, v3, aop_pid,
@@ -104,25 +235,6 @@ def get_document_input_data(
         extra,
     )
     return document.attribs
-
-
-def get_document_registered_data(input_data):
-    """
-    Obtém os dados do documento registrado
-    """
-    try:
-        registered_data = _get_registered_document_data(input_data)
-    except exceptions.DocumentDoesNotExistError:
-        LOGGER.debug("DocumentDoesNotExistError")
-        registered_data = {}
-    except exceptions.GetRegisteredDocumentError as e:
-        LOGGER.exception(
-            "Request document ID will create a new record "
-            "because it was not possible to recover any"
-        )
-        # raise exceptions.RequestDocumentIdError(e)
-        registered_data = {}
-    return registered_data
 
 
 def _log_request_update(request, data):
@@ -154,121 +266,68 @@ def _log_new_request(data, user):
     return request
 
 
-def _request_document_ids(
-        v2, v3, aop_pid,
-        doi_with_lang,
-        issns,
-        pub_year,
-        volume, number, suppl,
-        elocation_id, fpage, fpage_seq, lpage,
-        authors, collab,
-        article_titles,
-        partial_body,
-        zip_file_path,
-        extra=None,
-        ):
+def _pids_updated(input_data, registered_data):
     """
-    Obtém registro consultando com os dados do documento
-    Cria o registro
+    Check `input_data` pids were changed
+
+    Parameters
+    ----------
+    input_data: dict
+    registered_data: dict
+
+    Returns
+    -------
+    bool
+
+    Raises
+    ------
+    exceptions.InvalidXMLError
+
+    """
+    LOGGER.debug("Input data: %s" % input_data)
+
+    # obtém os pids dos dados de entrada
+    ids = _get_ids(input_data)
+
+    # adiciona os pids faltantes aos dados de entrada
+    _add_pids(input_data, registered_data)
+
+    # obtém os pids atualizados dos dados de entrada
+    new_ids = _get_ids(input_data)
+
+    # read xml
+    input_data['xml'] = xml_sps.get_xml_content(input_data['zip_file_path'])
+
+    if ids != new_ids:
+        # update xml with pids
+        input_data["xml"] = xml_sps.update_ids(
+            input_data["xml"],
+            input_data["v3"],
+            input_data["v2"],
+            input_data["aop_pid"],
+        )
+        return True
+    else:
+        return False
+
+
+def _add_pids(input_data, registered_data):
+    """
+    Atualiza input_data com IDs
+
+    Arguments
+    ---------
+    input_data: dict
+    registered_data: dict
 
     Returns
     -------
     dict
     """
-    document = Document(
-        v2, v3, aop_pid,
-        doi_with_lang,
-        issns,
-        pub_year,
-        volume, number, suppl,
-        elocation_id, fpage, fpage_seq, lpage,
-        authors, collab,
-        article_titles,
-        partial_body,
-        zip_file_path,
-        extra,
-    )
-    input_data = document.attribs
-    LOGGER.debug("Document %s" % input_data)
-
-    # obtém o documento registrado
-    try:
-        registered_data = _get_registered_document_data(input_data)
-    except exceptions.DocumentDoesNotExistError:
-        LOGGER.debug("DocumentDoesNotExistError")
-        registered_data = {}
-    except exceptions.GetRegisteredDocumentError as e:
-        LOGGER.exception(
-            "Request document ID will create a new record "
-            "because it was not possible to recover any"
-        )
-        # raise exceptions.RequestDocumentIdError(e)
-        registered_data = {}
-
-    data = _get_data_to_register(input_data, registered_data)
-    if not data:
-        LOGGER.debug("Document is already registered")
-        raise exceptions.DocumentIsAlreadyUpdatedError(
-            "Document is already registered"
-        )
-
-    try:
-        LOGGER.debug("Register document")
-        return _register_document(data)
-    except exceptions.SavingError as e:
-        raise exceptions.RequestDocumentIdError(e)
-
-
-def _get_data_to_register(input_data, registered_data):
-    """
-    Check `registered_data` and `input_data` and returns data to update
-
-    # novo, atualizado, pendente de atualização
-    # novo: registrar
-    # atualizado: finalizar
-    # pendente de atualização: registrar
-
-    """
-    LOGGER.debug("Input data: %s" % input_data)
-    if not registered_data:
-        # new document, get xml
-        LOGGER.debug("New document %s" %
-                     input_data['zip_file_path'])
-        input_data['xml'] = xml_sps.get_xml_from_zip_file(
-            input_data['zip_file_path'])
-
-    LOGGER.debug("Registered data: %s" % registered_data)
-    if _find_pids_divergences(input_data, registered_data):
-
-        LOGGER.debug("Conflicting IDs. Update IDs")
-
-        # add pids
-        data = _update_pids(input_data, registered_data)
-
-        data["xml"] = xml_sps.update_ids(
-            data["zip_file_path"],
-            data["v3"],
-            data["v2"],
-            data["aop_pid"],
-        )
-        return data, True
-
-
-def _update_pids(input_data, registered_data):
-    """
-    Atualiza input_data com IDs
-    Arguments
-    ---------
-        input_data: dict
-        registered_data: dict
-    Returns
-    -------
-        dict
-    """
-    registered_ids = _get_registered_document_ids(registered_data)
-    LOGGER.debug("registered_ids: %s" % registered_ids)
     input_data = _add_pid_v3(input_data, registered_data)
     input_data = _add_aop_pid(input_data, registered_data)
+    input_data = _add_pid_v2(input_data, registered_data)
+
     return input_data
 
 
@@ -300,8 +359,11 @@ class Document:
                 {"type": item["type"], "value": item["value"].upper()}
                 for item in issns
             ]
-        except KeyError:
-            raise ValueError("issns must have type and value")
+        except KeyError as e:
+            raise exceptions.InputDataError(
+                "issns must have type and value: %s %s" %
+                (issns, e)
+            )
 
         document_data["pub_year"] = pub_year.upper()
 
@@ -311,8 +373,10 @@ class Document:
                 {"lang": item["lang"], "value": item["value"].upper()}
                 for item in doi_with_lang
             ]
-        except KeyError:
-            raise ValueError("doi_with_lang must have lang and value")
+        except KeyError as e:
+            raise exceptions.InputDataError(
+                "doi_with_lang must have lang and value: %s %s" %
+                (doi_with_lang, e))
 
         # authors and collab
         document_data["collab"] = (collab or '').upper()
@@ -328,8 +392,10 @@ class Document:
                 }
                 for item in authors
             ]
-        except KeyError:
-            raise ValueError("authors must have surname and given_names")
+        except KeyError as e:
+            raise exceptions.InputDataError(
+                "authors must have surname and given_names: %s %s" %
+                (authors, e))
 
         # títulos do documento
         try:
@@ -337,8 +403,10 @@ class Document:
                 {"lang": item["lang"], "text": item["text"].upper()}
                 for item in article_titles
             ]
-        except KeyError:
-            raise ValueError("article_titles must have lang and text")
+        except KeyError as e:
+            raise exceptions.InputDataError(
+                "article_titles must have lang and text: %s %s" %
+                (article_titles, e))
 
         # dados complementares que identificam o documento
         document_data["volume"] = (volume or '').upper()
@@ -367,99 +435,93 @@ class Document:
 ##############################################
 
 
-def _find_pids_divergences(input_data, registered_data):
-    for k in ("aop_pid", "v2", "v3"):
-        if (input_data.get(k) or '') != (registered_data.get(k) or ''):
-            return True
-    return False
-
-
-def _get_registered_document_data(document_attribs):
+def _get_registered_document(document_attribs):
     """
-    Obtém registro consultando com dados do documento:
-        - com pid v2
-        - sem pid v2
-        - versão aop
+    Get registered document:
+    - search expression with pid v2
+    - search expression without pid v2
+    - search expression with aop version
 
-    Arguments
-    ---------
-        document: Document
+    Parameters
+    ----------
+    document: Document
 
     Returns
     -------
-        Package
+    Package
 
+    Raises
+    ------
+    exceptions.QueryingDocumentInIssueError
+    exceptions.QueryingDocumentAsAOPError
+    exceptions.FetchMostRecentRecordError
+    exceptions.NotEnoughParametersToGetDocumentRecordError
+    exceptions.DocumentDoesNotExistError
+    exceptions.GetRegisteredDocumentError
     """
     # busca o documento com dados do fascículo + pid v2
-    try:
-        LOGGER.debug("Find document with v2")
-        registered = _get_document_published_in_an_issue(
-            document_attribs, with_v2=True)
-        if not registered:
-            # busca o documento com dados do fascículo, sem pid v2
-            LOGGER.debug("Find document without v2")
-            registered = _get_document_published_in_an_issue(document_attribs)
-        if not registered:
-            # recupera dados de aop, se aplicável
-            LOGGER.debug("Find document published as aop")
-            registered = _get_document_published_as_aop(document_attribs)
-
-    except (
-            exceptions.QueryingDocumentInIssueError,
-            exceptions.QueryingDocumentAsAOPError,
-            exceptions.FetchMostRecentRecordError,
-            exceptions.NotEnoughParametersToGetDocumentRecordError,
-            ) as e:
-        raise exceptions.GetRegisteredDocumentError(e)
+    LOGGER.debug("Find document with v2")
+    registered = _get_document_published_in_an_issue(
+        document_attribs, with_v2=True)
+    if not registered:
+        # busca o documento com dados do fascículo, sem pid v2
+        LOGGER.debug("Find document without v2")
+        registered = _get_document_published_in_an_issue(document_attribs)
+    if not registered:
+        # recupera dados de aop, se aplicável
+        LOGGER.debug("Find document published as aop")
+        registered = _get_document_published_as_aop(document_attribs)
 
     try:
         doc = registered.as_dict()
     except AttributeError:
         raise exceptions.DocumentDoesNotExistError(
-            "Document does not exist %s" % document_attribs)
+            "Document does not exist %s" % document_attribs
+        )
 
     try:
-        return _fetch_most_recent_document(v3=doc["v3"]).as_dict()
+        return _fetch_most_recent_document(v3=doc["v3"])
     except KeyError as e:
-        raise exceptions.GetRegisteredDocumentError(e)
-    except exceptions.FetchMostRecentRecordError as e:
-        raise exceptions.GetRegisteredDocumentError(e)
+        raise exceptions.GetRegisteredDocumentError(
+            "Unable to get most recent document %s: %s" %
+            (doc, e)
+        )
 
 
-def _get_registered_document_ids(registered_data):
+def _get_ids(data):
     """
-    Obtém os IDs do documento registrado
+    Returns the document pids list
 
     Arguments
     ---------
-        registered_data: dict
+    data: dict
 
     Returns
     -------
-        None ou dict
+    list
 
     """
-    if registered_data:
-        _data = {}
+    pids = []
+    if data:
         for k in ("v2", "v3", "aop_pid"):
-            try:
-                _data[k] = registered_data[k]
-            except KeyError:
-                pass
-        return _data
+            pids.append(data.get(k) or '')
+    return pids
 
 
 def _get_query_parameters(document_attribs, with_v2=False, aop_version=False):
     """
-    Obtém os parâmetros para buscar um documento
+    Get query parameters
 
     Arguments
     ---------
-        document: Document
-        with_v2: bool
-        aop_version: bool
-        with_issue: bool
+    document: Document
+    with_v2: bool
+    aop_version: bool
+    with_issue: bool
 
+    Returns
+    -------
+    dict
     """
     params = {}
 
@@ -517,13 +579,13 @@ def _get_query_parameters(document_attribs, with_v2=False, aop_version=False):
 
 def _get_document_published_in_an_issue(document_attribs, with_v2=False):
     """
-    Busca documento com os dados do artigo + issue
+    Query document with issue data
 
     Arguments
     ---------
-        document_attribs: dict
-        with_v2: bool
-            usa ou não o v2 na consulta
+    document_attribs: dict
+    with_v2: bool
+        usa ou não o v2 na consulta
     """
     try:
         params = _get_query_parameters(document_attribs, with_v2=with_v2)
@@ -536,7 +598,7 @@ def _get_document_published_in_an_issue(document_attribs, with_v2=False):
 
 def _get_document_published_as_aop(document_attribs):
     """
-    Busca pela versão aop, ou seja, busca pelos dados do artigo:
+    Query document with aop data
         "issn", "pub_year",
         "doi",
         "authors",
@@ -546,7 +608,7 @@ def _get_document_published_as_aop(document_attribs):
 
     Arguments
     ---------
-        document_attribs: dict
+    document_attribs: dict
     """
     try:
         params = _get_query_parameters(document_attribs, aop_version=True)
@@ -571,7 +633,8 @@ def _add_aop_pid(input_data, registered_data):
     -------
         dict
     """
-    if (not registered_data.get("volume") and
+    if (registered_data and
+            not registered_data.get("volume") and
             not registered_data.get("number") and
             not registered_data.get("suppl")):
         input_data["aop_pid"] = registered_data["v2"]
@@ -593,12 +656,68 @@ def _add_pid_v2(input_data, registered_data):
     -------
         dict
     """
-    if not input_data["v2"]
+    if not input_data["v2"]:
         if registered_data:
             input_data["v2"] = registered_data["v2"]
         else:
-            input_data["v2"] = _get_unique_v2()
+            input_data["v2"] = _get_unique_v2(input_data)
     return input_data
+
+
+def _get_unique_v2(input_data):
+    """
+    Generate v2 and return it only if it is new
+
+    Returns
+    -------
+        str
+    """
+    issn_id = _get_issn_for_pid_v2
+    if not issn_id:
+        raise PidV2GenerationError(
+            "Unable to create pid v2 because there is no ISSN: %s" %
+            input_data
+        )
+    try:
+        year = input_data['pub_year']
+    except KeyError:
+        raise PidV2GenerationError(
+            "Unable to create pid v2 because there is no pub_year: %s" %
+            input_data
+        )
+
+    while True:
+        generated = _v2_generates(issn_id, year)
+        if not _is_registered_v2(generated):
+            return generated
+
+
+def _get_issn_for_pid_v2(input_data):
+    """
+    Generate v2 and return it only if it is new
+
+    Returns
+    -------
+        str
+    """
+    epub_issn = None
+    ppub_issn = None
+    for issn in input_data['issns']:
+        if issn['type'] == 'epub':
+            epub_issn = issn['value']
+        elif issn['type'] == 'ppub':
+            ppub_issn = issn['value']
+    return epub_issn or ppub_issn
+
+
+def _generate_v2_suffix():
+    return str(datetime.now().timestamp()).replace(".", "")
+
+
+def _v2_generates(issn_id, year):
+    randomnumber = _generate_v2_suffix()
+    randomnumber = randomnumber[5:] + "0" * 9
+    return f"S{issn_id}{year}{randomnumber[:9]}"
 
 
 def _add_pid_v3(input_data, registered_data):
@@ -635,9 +754,9 @@ def _get_unique_v3():
             return generated
 
 
-def _register_document(document_data):
+def _prepare_data_to_register(document_data, registered):
     try:
-        pkg = models.Package()
+        pkg = registered or models.Package()
 
         pkg.v3 = document_data["v3"]
 
@@ -686,6 +805,16 @@ def _register_document(document_data):
         # dados de processamento / procedimentos
         pkg.extra = document_data["extra"]
 
+        return pkg
+    except Exception as e:
+        raise exceptions.PrepareDataToSaveError(
+            "Preparing data to save error: %s %s %s" %
+            (type(e), e, document_data)
+        )
+
+
+def _register_document(pkg):
+    try:
         saved = pkg.save()
         LOGGER.debug("Saved")
         return saved
@@ -700,6 +829,7 @@ def _standardize_partial_body(body):
     para ajudar a desambiguar textos que não tem metadados como:
     autores, títulos, doi, entre outros, como, por exemplo, erratas
     """
+    body = body or ''
     body = " ".join([w for w in body.split() if w])
     return body[:500].upper()
 
@@ -723,7 +853,7 @@ def _fetch_most_recent_document(**kwargs):
     except exceptions.FetchRecordsError as e:
         raise exceptions.FetchMostRecentRecordError(
             "Unable to _fetch_most_recent_document %s %s %s" %
-            (kwargs, type(e), e)
+            (type(e), e, kwargs)
         )
 
 

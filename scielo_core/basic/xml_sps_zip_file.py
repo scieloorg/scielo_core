@@ -7,6 +7,10 @@ LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
+class XMLReadError(Exception):
+    ... 
+
+
 def get_xml_content(xml_sps_file_path):
     """
     Get XML content from XML file or Zip file
@@ -17,7 +21,7 @@ def get_xml_content(xml_sps_file_path):
 
     Return
     ------
-    bytes
+    str
     """
     try:
         LOGGER.info(
@@ -31,12 +35,14 @@ def get_xml_content(xml_sps_file_path):
         LOGGER.info(
             "Try to get xml content from xml file %s" % xml_sps_file_path
         )
-        with open(xml_sps_file_path, "rb") as fp:
-            return fp.read().decode("utf-8")
-    except Exception as e:
-        LOGGER.exception("Unable to get_xml_content %s %s %s" %
-                         (xml_sps_file_path, type(e), e))
-    LOGGER.info("...Get xml content from %s" % xml_sps_file_path)
+        try:
+            with open(xml_sps_file_path, "rb") as fp:
+                return fp.read().decode("utf-8")
+        except IOError as e:
+            raise XMLReadError(
+                "Unable to read %s: %s %s" %
+                (xml_sps_file_path, type(e), e)
+            )
 
 
 def update_zip_file_xml(xml_sps_file_path, content):

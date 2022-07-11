@@ -49,3 +49,12 @@ class NotFoundXMLError(Exception):
 
 class UnableToCreateXMLError(Exception):
     ...
+
+
+class InputDataError(Exception):
+    ...
+
+
+class InvalidXMLError(Exception):
+    ...
+

@@ -18,14 +18,19 @@ def get_xml(v2):
 
 
 def register_migration(docs_jsonl_file_path, issns_file_path, skip_update=False):
-    with open(docs_jsonl_file_path, "r") as fp:
+    with open(docs_jsonl_file_path, mode="r", encoding="iso-8859-1") as fp:
         issns = set()
         for row in fp.readlines():
-            LOGGER.info(row)
-            data = json.loads(row.strip())
-            issns.add(data["issn"])
-            resp = tasks.register_migration(data, skip_update, True)
-            LOGGER.info(resp)
+            try:
+                LOGGER.info(row)
+                data = json.loads(row.strip())
+                issns.add(data["issn"])
+                resp = tasks.register_migration(data, skip_update, True)
+                LOGGER.info(resp)
+            except (json.decoder.JSONDecodeError, UnicodeDecodeError) as e:
+                LOGGER.exception(f"{row} {e}")
+                with open("exceptions.log", "a") as fpexc:
+                    fpexc.write(f"{row}\n")
 
     with open(issns_file_path, "w") as fp:
         fp.write("\n".join(issns))
