@@ -55,6 +55,21 @@ class InputDataError(Exception):
     ...
 
 
+class PrepareDataToSaveError(Exception):
+    ...
+
+
+class ConclusionError(Exception):
+    ...
+
+
 class InvalidXMLError(Exception):
     ...
 
+
+class NotAllowedAOPInputError(Exception):
+    ...
+
+
+class QueryingDocumentWithoutIssueDataError(Exception):
+    ...

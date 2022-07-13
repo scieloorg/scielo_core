@@ -1,6 +1,7 @@
 import logging
 
 from lxml import etree
+
 from packtools.sps.models.article_ids import ArticleIds
 from packtools.sps.models.article_doi_with_lang import DoiWithLang
 from packtools.sps.models.front_journal_meta import ISSN
@@ -8,6 +9,7 @@ from packtools.sps.models.front_articlemeta_issue import ArticleMetaIssue
 from packtools.sps.models.article_authors import Authors
 from packtools.sps.models.article_titles import ArticleTitles
 from packtools.sps.models.body import Body
+from packtools.sps.models.dates import ArticleDates
 
 from scielo_core.basic import xml_sps_zip_file
 from scielo_core.basic import exceptions
@@ -20,9 +22,25 @@ LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 get_xml_content = xml_sps_zip_file.get_xml_content
 
 
+def split_processing_instruction_doctype_declaration_and_xml(xml_content):
+    xml_content = xml_content.strip()
+
+    p = xml_content.rfind("</")
+    endtag = xml_content[p:]
+    starttag = endtag.replace("/", "").replace(">", "").strip()
+
+    p = xml_content.find(starttag)
+    return xml_content[:p], xml_content[p:].strip()
+
+
 def get_xml_tree(xml_content):
     try:
-        return etree.fromstring(xml_content)
+        # return etree.fromstring(xml_content)
+        pref, xml = split_processing_instruction_doctype_declaration_and_xml(
+            xml_content
+        )
+        return etree.fromstring(xml)
+
     except etree.XMLSyntaxError as e:
         raise exceptions.InvalidXMLError(e)
 
@@ -34,7 +52,8 @@ def update_ids(xml_content, v3, v2, aop_pid):
     article_ids = ArticleIds(xmltree)
     article_ids.v3 = v3
     article_ids.v2 = v2
-    article_ids.aop_pid = aop_pid
+    if aop_pid:
+        article_ids.aop_pid = aop_pid
 
     # update XML
     return etree.tostring(
@@ -44,7 +63,8 @@ def update_ids(xml_content, v3, v2, aop_pid):
 class IdRequestArguments:
 
     def __init__(self, zip_file_path):
-        self.xmltree = get_xml_tree(xml_sps_zip_file.get_xml_content(zip_file_path))
+        self.xml_content = xml_sps_zip_file.get_xml_content(zip_file_path)
+        self.xmltree = get_xml_tree(self.xml_content)
         self.zip_file_path = zip_file_path
 
     @property
@@ -56,7 +76,7 @@ class IdRequestArguments:
         _data.update(self.authors)
         _data.update(self.article_titles)
         _data.update(self.partial_body)
-        _data['zip_file_path'] = self.zip_file_path
+        _data['xml'] = self.xml_content
         return _data
 
     @property
@@ -64,9 +84,8 @@ class IdRequestArguments:
         article_ids = ArticleIds(self.xmltree)
         data = article_ids.data
         return {
-            "v2": data.get("v2"),
-            "v3": data.get("v3"),
-            "aop_pid": data.get("aop_pid"),
+            k: data.get(k)
+            for k in ("v3", "v2", "aop_pid")
         }
 
     @property
@@ -91,6 +110,8 @@ class IdRequestArguments:
         }
         article_in_issue = ArticleMetaIssue(self.xmltree)
         _data.update(article_in_issue.data)
+        if not _data.get("pub_year"):
+            _data["pub_year"] = ArticleDates(self.xmltree).article_date["year"]
         return _data
 
     @property

@@ -108,6 +108,8 @@ class Package(Document):
 
     # dados que identificam o documento e que sempre estão presentes
     issns = EmbeddedDocumentListField(ISSN)
+
+    # collection year
     pub_year = StringField()
 
     # dados que identificam o documento e não são obrigatórios

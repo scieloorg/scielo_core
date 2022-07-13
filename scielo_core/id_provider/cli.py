@@ -1,3 +1,4 @@
+import os
 import sys
 import argparse
 import logging
@@ -10,13 +11,25 @@ LOGGER = logging.getLogger(__name__)
 LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
+def request_id(source_file_path, output_file_path):
+    LOGGER.info(source_file_path)
+    name, ext = os.path.splitext(source_file_path)
+    if ext in (".zip", ".xml"):
+        return _request_id(source_file_path, "commandline")
+    return _request_id_for_a_xml_list(source_file_path, output_file_path)
+
+
 def _request_id(pkg_file_path, username):
+    LOGGER.info("_request_id")
     if run_concurrently():
+        LOGGER.info("tasks")
         return tasks.request_id(pkg_file_path, username, get_result=False)
-    return controller.request_document_ids(pkg_file_path, username)
+    LOGGER.info("controller")
+    return controller.request_document_ids_from_file(pkg_file_path, username)
 
 
 def _request_id_for_a_xml_list(source_file_path, output_file_path):
+    LOGGER.info("_request_id_for_a_xml_list")
     with open(source_file_path) as fp:
         for row in fp.readlines():
             resp = _request_id(row.strip(), "commandline")
@@ -68,7 +81,7 @@ def cli(argv=None):
         level=getattr(logging, args.loglevel.upper(), 999), format=LOGGER_FMT
     )
     if args.command == "request_id":
-        _request_id_for_a_xml_list(args.source_file_path, args.output_file_path)
+        request_id(args.source_file_path, args.output_file_path)
     elif args.command == "get_xml":
         get_xml(args.v3)
     else:

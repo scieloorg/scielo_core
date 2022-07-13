@@ -21,6 +21,8 @@ def request_document_id(pkg_file_path, username):
         LOGGER.debug("request_document_id %s %s" % (pkg_file_path, username))
         response = controller.request_document_ids_from_file(
             pkg_file_path, username)
+    except (exceptions.NotAllowedAOPInputError):
+        return HTTPStatus.FORBIDDEN
     except (exceptions.InvalidXMLError, exceptions.InputDataError):
         return HTTPStatus.BAD_REQUEST
     except exceptions.SaveError:

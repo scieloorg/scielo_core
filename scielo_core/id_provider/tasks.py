@@ -52,5 +52,5 @@ def request_id(pkg_file_path, username, get_result=None):
 
 @app.task(name='request_id')
 def task_request_id(pkg_file_path, username):
-    return controller.request_document_ids(pkg_file_path, username)
+    return controller.request_document_ids_from_file(pkg_file_path, username)
 
