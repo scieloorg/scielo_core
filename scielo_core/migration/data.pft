@@ -1,0 +1,14 @@
+/* nohup ./mx ../bases/artigo/artigo btell=0 tp=h lw=9999 "pft=@x.pft" now > pids_2022-06-02.txt& */
+,if a(v41) then
+,'{',
+    ,'"v2": "',v880^*,'", ',
+    ,'"aop_pid": "',v881,'", ',
+    ,'"file_path": "',replace(v702, '\', '/'),'", ',
+    ,'"issn": "',v35,'", ',
+    ,'"year": "',v65*0.4,'", ',
+    ,'"order": "',v880*14.4,'", ',
+    ,'"v91": "',ref(mfn-1,v91),'", ',
+    ,'"v93": "',ref(mfn-1,v93),'", ',
+    ,'"is_aop": ',if v32='ahead' then 'true' else 'false' fi,
+,'}',#
+,fi,
