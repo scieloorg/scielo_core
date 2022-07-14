@@ -1,4 +1,7 @@
+from shutil import copyfile
+from tempfile import mkdtemp
 import logging
+import os
 
 from lxml import etree
 
@@ -20,6 +23,13 @@ LOGGER_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
 get_xml_content = xml_sps_zip_file.get_xml_content
+
+
+def create_tmp_copy(source_file_path, dest_file_path=None):
+    if not dest_file_path:
+        dest_file_path = os.path.join(mkdtemp(), os.path.basename(source_file_path))
+    copyfile(source_file_path, dest_file_path)
+    return dest_file_path
 
 
 def split_processing_instruction_doctype_declaration_and_xml(xml_content):
@@ -62,10 +72,9 @@ def update_ids(xml_content, v3, v2, aop_pid):
 
 class IdRequestArguments:
 
-    def __init__(self, zip_file_path):
-        self.xml_content = xml_sps_zip_file.get_xml_content(zip_file_path)
+    def __init__(self, xml_content):
+        self.xml_content = xml_content
         self.xmltree = get_xml_tree(self.xml_content)
-        self.zip_file_path = zip_file_path
 
     @property
     def data(self):

@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from http import HTTPStatus
+from shutil import copyfile
 
 from scielo_core.basic import mongo_db, xml_sps_zip_file
 from scielo_core.basic.exceptions import InvalidXMLError
@@ -35,28 +36,46 @@ def get_xml(v3):
         return
 
 
-def request_document_ids_from_file(pkg_file_path, user=None):
+def request_document_ids_from_file(pkg_file_path, user=None, bkp_pkg_path=None):
     LOGGER.debug(pkg_file_path)
+    user = user or 'unknown'
+    changes = {}
 
+    bkp_pkg_path = xml_sps.create_tmp_copy(pkg_file_path, bkp_pkg_path)
+
+    pkg_items = xml_sps_zip_file.get_xml_content_items(bkp_pkg_path)
+    for file_name in pkg_items.keys():
+        try:
+            prefix, xml = xml_sps.split_processing_instruction_doctype_declaration_and_xml(
+                pkg_items[file_name]
+            )
+            changed_xml = request_document_ids_from_xml(xml, file_name, user)
+            save_changed_xml(changed_xml, bkp_pkg_path, file_name, prefix)
+            if changed_xml:
+                changes[file_name] = changed_xml
+        except Exception as e:
+            LOGGER.exception(
+                "Unexpected error request_document_ids_from_xml %s %s: %s %s" %
+                (bkp_pkg_path, file_name, type(e), e)
+            )
+    ret = {"pkg_path": bkp_pkg_path}
+    if any(changes.values()):
+        ret['changes'] = {k: v for k, v in changes.items() if v}
+    return ret
+
+
+def request_document_ids_from_xml(xml_content, file_name, user):
     try:
-        arguments = xml_sps.IdRequestArguments(pkg_file_path)
+        arguments = xml_sps.IdRequestArguments(xml_content)
     except InvalidXMLError as e:
         raise exceptions.InvalidXMLError(
-            "Invalid XML in %s: %s" % (pkg_file_path, e)
+            "Invalid XML in %s: %s" % (file_name, e)
         )
 
     try:
         params = arguments.data
         params['user'] = user
-        # print(params)
-        changed_input_xml = request_document_ids(**params)
-        if changed_input_xml:
-            pref, xml = xml_sps.split_processing_instruction_doctype_declaration_and_xml(
-                params['xml']
-            )
-            xml_sps_zip_file.update_zip_file_xml(
-                pkg_file_path, pref + changed_input_xml)
-        return changed_input_xml
+        return request_document_ids(**params)
     except (
             exceptions.InputDataError,
             exceptions.QueryingDocumentInIssueError,
@@ -73,6 +92,12 @@ def request_document_ids_from_file(pkg_file_path, user=None):
             exceptions.SavingError,
             ) as e:
         raise exceptions.ConclusionError(e)
+
+
+def save_changed_xml(changed_input_xml, pkg_file_path, file_name, prefix):
+    if changed_input_xml:
+        xml_sps_zip_file.update_zip_file_xml(
+            pkg_file_path, file_name, prefix + changed_input_xml)
 
 
 def request_document_ids(
@@ -176,7 +201,8 @@ def request_document_ids(
     pkg = _prepare_data_to_register(input_data, registered)
 
     # grava
-    _register_document(pkg)
+    if pkg:
+        _register_document(pkg)
 
     # registra a atualização da requisição
     _log_request_update(request, input_data)
@@ -335,8 +361,8 @@ def _add_pids(input_data, registered_data):
     dict
     """
     input_data = _add_pid_v3(input_data, registered_data)
-    input_data = _add_aop_pid(input_data, registered_data)
     input_data = _add_pid_v2(input_data, registered_data)
+    input_data = _add_aop_pid(input_data, registered_data)
 
     return input_data
 
@@ -475,10 +501,10 @@ def _get_registered_document(document_attribs):
         registered = _get_document_omiting_issue_data(document_attribs)
     else:
         # it is not aop
-        if not registered:
-            # busca o documento com dados do fascículo + pid v2
-            registered = _get_document_published_in_an_issue(
-                document_attribs, with_v2=True)
+        # if not registered:
+        #     # busca o documento com dados do fascículo + pid v2
+        #     registered = _get_document_published_in_an_issue(
+        #         document_attribs, with_v2=True)
         if not registered:
             # busca o documento com dados do fascículo, sem pid v2
             registered = _get_document_published_in_an_issue(document_attribs)
@@ -820,7 +846,10 @@ def _get_unique_v3():
 
 def _prepare_data_to_register(document_data, registered):
     try:
-        pkg = registered or models.Package()
+        if registered and registered.xml == document_data['xml']:
+            return None
+
+        pkg = models.Package()
 
         pkg.v3 = document_data["v3"]
 

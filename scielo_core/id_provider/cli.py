@@ -81,7 +81,8 @@ def cli(argv=None):
         level=getattr(logging, args.loglevel.upper(), 999), format=LOGGER_FMT
     )
     if args.command == "request_id":
-        request_id(args.source_file_path, args.output_file_path)
+        resp = request_id(args.source_file_path, args.output_file_path)
+        print(resp)
     elif args.command == "get_xml":
         get_xml(args.v3)
     else:
